@@ -1,16 +1,21 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
-// @namespace    http://tampermonkey.net/
-// @version      2.5.0
+// @namespace    https://github.com/cbkii/userscripts
+// @version      2.5.2
 // @description  Accelerates download countdown timers and enables download controls.
 // @author       cbkii
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:up|down|load|dl|mirror|drain|transfer)[a-z0-9-]*|[a-z0-9-]*(?:up|down|load|dl|mirror|drain|transfer))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:download|upload|share|file|cloud|drop|send|host|locker|mirror)[a-z0-9-]*|[a-z0-9-]*(?:download|upload|share|file|cloud|drop|send|host|locker|mirror))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:rapid|nitro|turbo|mega|fichier|uloz|bytez|kat|k2s)[a-z0-9-]*|[a-z0-9-]*(?:rapid|nitro|turbo|mega|fichier|uloz|bytez|kat|k2s))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
+// @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/dlcountdown.user.js
+// @downloadURL  https://raw.githubusercontent.com/cbkii/userscripts/main/dlcountdown.user.js
+// @homepageURL  https://github.com/cbkii/userscripts
+// @supportURL   https://github.com/cbkii/userscripts/issues
 // @grant        GM_registerMenuCommand
 // @grant        GM_unregisterMenuCommand
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        unsafeWindow
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
@@ -19,14 +24,15 @@
   Feature summary:
   - Accelerates common download countdown timers.
   - Enables disabled download controls when timers finish.
-  - Provides a menu toggle and keyboard shortcut.
+  - Provides a menu toggle and keyboard shortcut (acceleration starts only when enabled).
 
   How it works:
-  - Hooks timers, detects countdown-like delays, and shortens them.
+  - Hooks timers, detects countdown-like delays, and shortens them when enabled.
   - Scans the DOM for timer elements and updates them faster.
 
   Configuration:
   - Adjust ACCELERATION_FACTOR and related constants inside main().
+  - Default state is disabled; use the userscript menu or shortcut to enable.
 */
 
 (function() {

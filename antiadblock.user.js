@@ -1,10 +1,22 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
-// @namespace    https://example.invalid/antiads-all
-// @version      8.2.0
+// @namespace    https://github.com/cbkii/userscripts
+// @version      8.2.2
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @match        *://*/*
+// @exclude      *://*/login*
+// @exclude      *://*/logout*
+// @exclude      *://*/signin*
+// @exclude      *://*/signup*
+// @exclude      *://*/register*
+// @exclude      *://*/checkout*
+// @exclude      *://*/billing*
+// @exclude      *://*/payment*
+// @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/antiadblock.user.js
+// @downloadURL  https://raw.githubusercontent.com/cbkii/userscripts/main/antiadblock.user.js
+// @homepageURL  https://github.com/cbkii/userscripts
+// @supportURL   https://github.com/cbkii/userscripts/issues
 // @run-at       document-start
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -12,7 +24,8 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
-// @connect      *
+// @connect      easylist-downloads.adblockplus.org
+// @connect      raw.githubusercontent.com
 // ==/UserScript==
 
 /*

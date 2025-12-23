@@ -23,8 +23,14 @@ A change is complete only when all items below are true:
 
 ### Layout
 - `scripts/<short-name>.user.js` — one userscript per file
-- `lib/` — optional shared helpers (plain JS, no build step unless explicitly added)
 - `docs/<short-name>.md` — optional per-script usage and test notes
+
+### Dependencies and updates (single-file only)
+- **Single-file only**: each userscript must be fully self-contained; do not add a `lib/` folder or any shared local JS files.
+- External dependencies must come from **trustworthy, stable CDNs** (e.g., official vendor CDNs, Google Hosted Libraries, cdnjs).
+- Prefer using the **same CDN URL + version** across scripts for shared dependencies (e.g., one jQuery version reused consistently).
+- Pin versions and update **weekly or less frequently**, unless a critical fix requires a faster bump.
+- Assume the repository is **public**, and metadata URLs must point at the public GitHub repo.
 
 ### Script structure rules
 - Must start with the metadata block (no BOM, no leading whitespace).
@@ -54,7 +60,7 @@ A change is complete only when all items below are true:
 Use these unless you have a strong reason not to:
 
 - `@name`
-- `@namespace`
+- `@namespace` set to `https://github.com/cbkii/userscripts`
 - `@version`
 - `@description` (concise English-only summary of main purpose and key features)
 - `@match` (preferred) or `@include`
@@ -65,6 +71,10 @@ Use these unless you have a strong reason not to:
 - `@author`
 - `@license` (if you publish)
 - `@noframes` (if you do not want to run inside iframes)
+- `@homepageURL` set to `https://github.com/cbkii/userscripts`
+- `@supportURL` set to `https://github.com/cbkii/userscripts/issues`
+- `@updateURL` and `@downloadURL` both set to the raw GitHub URL for the script on `main`, e.g.:
+  - `https://raw.githubusercontent.com/cbkii/userscripts/main/<script>.user.js`
 - `@connect` (for any cross-origin network use)
 - `@updateURL` / `@downloadURL` (if you control distribution)
 - `@supportURL` / `@homepageURL` (if publishing)
