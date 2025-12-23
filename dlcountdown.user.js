@@ -2,7 +2,7 @@
 // @name         Download Timer Accelerator Pro
 // @namespace    http://tampermonkey.net/
 // @version      2.5.0
-// @description  Accelerates download countdown timers while ensuring proper completion and validation
+// @description  Accelerates download countdown timers and enables download controls.
 // @author       cbkii
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:up|down|load|dl|mirror|drain|transfer)[a-z0-9-]*|[a-z0-9-]*(?:up|down|load|dl|mirror|drain|transfer))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:download|upload|share|file|cloud|drop|send|host|locker|mirror)[a-z0-9-]*|[a-z0-9-]*(?:download|upload|share|file|cloud|drop|send|host|locker|mirror))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
@@ -15,8 +15,27 @@
 // @noframes
 // ==/UserScript==
 
+/*
+  Feature summary:
+  - Accelerates common download countdown timers.
+  - Enables disabled download controls when timers finish.
+  - Provides a menu toggle and keyboard shortcut.
+
+  How it works:
+  - Hooks timers, detects countdown-like delays, and shortens them.
+  - Scans the DOM for timer elements and updates them faster.
+
+  Configuration:
+  - Adjust ACCELERATION_FACTOR and related constants inside main().
+*/
+
 (function() {
     'use strict';
+
+    const DEBUG = false;
+    const LOG_PREFIX = '[dlcountdown]';
+
+    function main() {
 
     // Configuration
     const ACCELERATION_FACTOR = 100;  // 100x speed (1000ms becomes 10ms)
@@ -592,4 +611,11 @@
     // Start immediately
     initialize();
 
+    }
+
+    try {
+        main();
+    } catch (err) {
+        console.error(LOG_PREFIX, 'fatal error', err);
+    }
 })();

@@ -2,13 +2,30 @@
 // @name         Export Full Page Info (XBrowser)
 // @author       cbkii
 // @version      1.2.0
-// @description  Export full HTML, scripts, styles, and Performance resources to a .txt file (for XBrowser Tools Menu)
+// @description  Exports HTML, scripts, styles, and resource timing to a text file.
 // @match        *://*/*
 // @run-at       tools-menu
 // ==/UserScript==
 
+/*
+  Feature summary:
+  - Exports full page HTML, script/style details, and performance resources.
+  - Saves output to a timestamped text file from the tools menu.
+
+  How it works:
+  - Collects DOM and performance data, then downloads it as a .txt file.
+
+  Configuration:
+  - No user settings; run from the tools menu when needed.
+*/
+
 (function () {
   'use strict';
+
+  const DEBUG = false;
+  const LOG_PREFIX = '[pageinfo-export]';
+
+  function main() {
 
   const pad = n => (n < 10 ? '0' : '') + n;
   const nowStamp = () => {
@@ -204,4 +221,12 @@
   };
 
   exportNow();
+
+  }
+
+  try {
+    main();
+  } catch (err) {
+    console.error(LOG_PREFIX, 'fatal error', err);
+  }
 })();

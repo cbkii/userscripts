@@ -2,14 +2,31 @@
 // @name         Router Contrast Dark Mode
 // @namespace    http://tampermonkey.net/
 // @version      2.3
-// @description  High-contrast dark mode for vx230v
+// @description  High-contrast dark mode for the VX230V router UI.
 // @match        http://192.168.1.1/*
 // @match        https://192.168.1.1/*
 // @grant        GM_addStyle
 // ==/UserScript==
 
+/*
+  Feature summary:
+  - Applies a high-contrast dark theme to the router UI.
+  - Keeps map icons readable and maintains dark background overrides.
+
+  How it works:
+  - Injects CSS for dark styling and observes DOM changes to reapply styles.
+
+  Configuration:
+  - No user settings; edit the CSS in main() if needed.
+*/
+
 (function () {
   'use strict';
+
+  const DEBUG = false;
+  const LOG_PREFIX = '[vxdark]';
+
+  function main() {
 
   /************ Global CSS Styles ************/
   GM_addStyle(`
@@ -136,5 +153,13 @@
     applyMainStyle();
     const mainObserver = new MutationObserver(applyMainStyle);
     mainObserver.observe(main, { attributes: true, childList: true, subtree: false });
+  }
+
+  }
+
+  try {
+    main();
+  } catch (err) {
+    console.error(LOG_PREFIX, 'fatal error', err);
   }
 })();

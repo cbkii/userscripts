@@ -2,7 +2,7 @@
 // @name		Google Extra Search (Mobile)
 // @namespace	http://github.com/
 // @author      cbkii (mobile UI by Claude)
-// @description	Google search tool with mobile-optimized UI. Features: Built-in search bar, site filters (academic, government, shopping, streaming), file type filters, smart Google dorks, Australian-focused content, dark mode, collapsible categories, alphabetically sorted options, help system, and detailed filter inspection. Three-tier organization: Sites, File Types, and Smart Dorks. Inspired by vemalsar
+// @description	Mobile Google search helper with filters, dorks, and a compact UI.
 // @version		3.1.2
 
 // @require     https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
@@ -32,15 +32,27 @@
 
 // ==/UserScript==
 
-// ✨ PRODUCTION FEATURES:
-// 🌐 Site Filters: 13 categories including Academic, Government, Jobs, Developer Resources
-// 📁 File Types: 17 categories from Documents to Source Code to Media Files  
-// 🔍 Smart Dorks: 5 categories of advanced Google search patterns and operators
-// 📱 Mobile UI: Floating Action Button with expandable modal interface
-// 🌙 Dark Mode: Automatic detection and dynamic theme adaptation
-// 🇦🇺 Australian Focus: AU-specific sites, subreddits, government domains
-// 📊 Filter Inspection: Click item counts to see exactly what's included
-// ⚡ Touch-Optimized: Large tap targets, smooth animations, responsive design
+/*
+  Feature summary:
+  - Adds a mobile-friendly Google search helper with site, file-type, and dork filters.
+  - Includes a floating action button, category panels, and dark mode styling.
+
+  How it works:
+  - Builds UI controls on Google search pages and modifies the query with
+    selected filters and operators.
+
+  Configuration:
+  - Options are stored via GM_getValue/GM_setValue and can be adjusted in the UI.
+*/
+
+(() => {
+  'use strict';
+
+  const DEBUG = false;
+  const LOG_PREFIX = '[google-extra-search]';
+  const log = (...args) => { if (DEBUG) console.log(LOG_PREFIX, ...args); };
+
+  function main() {
 
 // ==========================
 // DOMAIN URL ARRAYS
@@ -1516,3 +1528,12 @@ if (document.readyState === 'loading') {
 } else {
     init();
 }
+
+  }
+
+  try {
+    main();
+  } catch (err) {
+    console.error(LOG_PREFIX, 'fatal error', err);
+  }
+})();
