@@ -283,8 +283,8 @@
             GM_setValue(EXCLUDE_TS_KEY, Date.now());
             return true;
         } catch (_) {
-            // If storage fails, at least try to persist the timestamp to avoid refetch loops.
-            try { GM_setValue(EXCLUDE_TS_KEY, Date.now()); } catch (_) {}
+            // Do NOT advance the timestamp if the cache write fails; keep refresh eligible.
+            try { GM_deleteValue?.(EXCLUDE_CACHE_KEY); } catch (_) {}
             return false;
         }
     };
