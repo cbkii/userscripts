@@ -395,11 +395,11 @@
         }
 
         if (shouldRefreshExclusions()) {
-            refreshExclusions().then((fresh) => {
-                if (fresh.size && isExcludedHost(fresh)) {
-                    log('info', 'Excluded host detected after refresh:', HOST);
-                }
-            });
+            const fresh = await refreshExclusions();
+            if (fresh.size && isExcludedHost(fresh)) {
+                log('info', 'Excluded host detected after refresh:', HOST);
+                return;
+            }
         }
 
         init();
