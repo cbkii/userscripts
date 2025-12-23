@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.23.1554
+// @version      2025.12.23.1657
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions.
 // @author       cbcoz
 // @match        *://chat.openai.com/*
@@ -13,6 +13,8 @@
 // @run-at       document-idle
 // @noframes
 // @grant        GM_setClipboard
+// @grant        GM_getValue
+// @grant        GM_setValue
 // ==/UserScript==
 
 /*
@@ -35,7 +37,7 @@
   'use strict';
 
   const DEBUG = false;
-  const LOG_PREFIX = '[chatgpt-exporter]';
+  const LOG_PREFIX = '[cgpt]';
   const BUTTONS_ID = 'exporter-buttons';
   const POPUP_ID = 'export-popup';
   const STATE = {
@@ -43,11 +45,89 @@
     citations: true
   };
 
-  const log = (...args) => {
-    if (DEBUG) {
-      console.log(LOG_PREFIX, ...args);
-    }
+  const LOG_STORAGE_KEY = 'userscript.logs.chatgptmd';
+  const LOG_MAX_ENTRIES = 200;
+
+  const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
+    let debugEnabled = !!debug;
+    const SENSITIVE_KEY_RE = /pass(word)?|token|secret|auth|session|cookie|key/i;
+    const scrubString = (value) => {
+      if (typeof value !== 'string') return '';
+      let text = value.replace(
+        /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
+        '$1$2=[redacted]'
+      );
+      try {
+        const url = new URL(text);
+        text = `${url.origin}${url.pathname}`;
+      } catch (_) {}
+      return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+    };
+    const describeElement = (value) => {
+      if (!value || !value.tagName) return 'element';
+      const id = value.id ? `#${value.id}` : '';
+      const classes = value.classList && value.classList.length
+        ? `.${Array.from(value.classList).slice(0, 2).join('.')}`
+        : '';
+      return `${value.tagName.toLowerCase()}${id}${classes}`;
+    };
+    const scrubValue = (value, depth = 0) => {
+      if (value == null) return value;
+      if (typeof value === 'string') return scrubString(value);
+      if (value instanceof Error) {
+        return { name: value.name, message: scrubString(value.message) };
+      }
+      if (typeof Element !== 'undefined' && value instanceof Element) {
+        return describeElement(value);
+      }
+      if (typeof value === 'object') {
+        if (depth >= 1) return '[truncated]';
+        if (Array.isArray(value)) {
+          return value.slice(0, 4).map((item) => scrubValue(item, depth + 1));
+        }
+        const out = {};
+        Object.keys(value).slice(0, 4).forEach((key) => {
+          out[key] = SENSITIVE_KEY_RE.test(key)
+            ? '[redacted]'
+            : scrubValue(value[key], depth + 1);
+        });
+        return out;
+      }
+      return value;
+    };
+    const writeEntry = (level, message, meta) => {
+      try {
+        const existing = GM_getValue(storageKey, []);
+        const list = Array.isArray(existing) ? existing : [];
+        list.push({ ts: new Date().toISOString(), level, message, meta });
+        if (list.length > maxEntries) {
+          list.splice(0, list.length - maxEntries);
+        }
+        GM_setValue(storageKey, list);
+      } catch (_) {}
+    };
+    const log = (level, message, meta) => {
+      if (level === 'debug' && !debugEnabled) return;
+      const msg = typeof message === 'string' ? scrubString(message) : 'event';
+      const data = typeof message === 'string' ? meta : message;
+      const sanitized = data === undefined ? undefined : scrubValue(data);
+      writeEntry(level, msg, sanitized);
+      if (debugEnabled || level === 'warn' || level === 'error') {
+        const method = level === 'debug' ? 'log' : level;
+        const payload = sanitized === undefined ? [] : [sanitized];
+        console[method](prefix, msg, ...payload);
+      }
+    };
+    log.setDebug = (value) => { debugEnabled = !!value; };
+    return log;
   };
+
+  const log = createLogger({
+    prefix: LOG_PREFIX,
+    storageKey: LOG_STORAGE_KEY,
+    maxEntries: LOG_MAX_ENTRIES,
+    debug: DEBUG
+  });
 
   function main() {
     wrapHistory('pushState');
@@ -602,7 +682,7 @@
       }
       return await response.json();
     } catch (error) {
-      console.error(LOG_PREFIX, 'API export failed', error);
+      log('error', 'API export failed', error);
       return null;
     }
   }
@@ -624,7 +704,7 @@
       alert('✅ Copied to clipboard.');
       return true;
     } catch (error) {
-      console.error(LOG_PREFIX, 'Clipboard copy failed', error);
+      log('error', 'Clipboard copy failed', error);
       alert('❗ Unable to copy to clipboard.');
       return false;
     }
@@ -656,7 +736,7 @@
       }
       return true;
     } catch (error) {
-      console.error(LOG_PREFIX, 'Share failed', error);
+      log('error', 'Share failed', error);
       alert('❗ Share failed.');
       return false;
     }
@@ -901,7 +981,7 @@
         setTimeout(() => link.remove(), 500);
         return true;
       } catch (fallbackError) {
-        console.error(LOG_PREFIX, 'Download failed:', fallbackError);
+        log('error', 'Download failed', fallbackError);
         alert('❗ Download failed. Try copying manually.');
         return false;
       }
@@ -911,6 +991,6 @@
   try {
     main();
   } catch (error) {
-    console.error(LOG_PREFIX, 'fatal error', error);
+    log('error', 'fatal error', error);
   }
 })();

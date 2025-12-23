@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii (mobile UI by Claude)
 // @description  Mobile Google search helper with filters, dorks, and a compact UI.
-// @version      2025.01.31.1200
+// @version      2025.12.23.1657
 // @require      https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
 // @require      https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js
 // @match        *://www.google.*/search*
@@ -48,8 +48,90 @@
   'use strict';
 
   const DEBUG = false;
-  const LOG_PREFIX = '[google-extra-search]';
-  const log = (...args) => { if (DEBUG) console.log(LOG_PREFIX, ...args); };
+  const LOG_PREFIX = '[gsearch]';
+  const LOG_STORAGE_KEY = 'userscript.logs.googlemobile';
+  const LOG_MAX_ENTRIES = 200;
+
+  const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
+    let debugEnabled = !!debug;
+    const SENSITIVE_KEY_RE = /pass(word)?|token|secret|auth|session|cookie|key/i;
+    const scrubString = (value) => {
+      if (typeof value !== 'string') return '';
+      let text = value.replace(
+        /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
+        '$1$2=[redacted]'
+      );
+      try {
+        const url = new URL(text);
+        text = `${url.origin}${url.pathname}`;
+      } catch (_) {}
+      return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+    };
+    const describeElement = (value) => {
+      if (!value || !value.tagName) return 'element';
+      const id = value.id ? `#${value.id}` : '';
+      const classes = value.classList && value.classList.length
+        ? `.${Array.from(value.classList).slice(0, 2).join('.')}`
+        : '';
+      return `${value.tagName.toLowerCase()}${id}${classes}`;
+    };
+    const scrubValue = (value, depth = 0) => {
+      if (value == null) return value;
+      if (typeof value === 'string') return scrubString(value);
+      if (value instanceof Error) {
+        return { name: value.name, message: scrubString(value.message) };
+      }
+      if (typeof Element !== 'undefined' && value instanceof Element) {
+        return describeElement(value);
+      }
+      if (typeof value === 'object') {
+        if (depth >= 1) return '[truncated]';
+        if (Array.isArray(value)) {
+          return value.slice(0, 4).map((item) => scrubValue(item, depth + 1));
+        }
+        const out = {};
+        Object.keys(value).slice(0, 4).forEach((key) => {
+          out[key] = SENSITIVE_KEY_RE.test(key)
+            ? '[redacted]'
+            : scrubValue(value[key], depth + 1);
+        });
+        return out;
+      }
+      return value;
+    };
+    const writeEntry = (level, message, meta) => {
+      try {
+        const existing = GM_getValue(storageKey, []);
+        const list = Array.isArray(existing) ? existing : [];
+        list.push({ ts: new Date().toISOString(), level, message, meta });
+        if (list.length > maxEntries) {
+          list.splice(0, list.length - maxEntries);
+        }
+        GM_setValue(storageKey, list);
+      } catch (_) {}
+    };
+    const log = (level, message, meta) => {
+      if (level === 'debug' && !debugEnabled) return;
+      const msg = typeof message === 'string' ? scrubString(message) : 'event';
+      const data = typeof message === 'string' ? meta : message;
+      const sanitized = data === undefined ? undefined : scrubValue(data);
+      writeEntry(level, msg, sanitized);
+      if (debugEnabled || level === 'warn' || level === 'error') {
+        const method = level === 'debug' ? 'log' : level;
+        const payload = sanitized === undefined ? [] : [sanitized];
+        console[method](prefix, msg, ...payload);
+      }
+    };
+    log.setDebug = (value) => { debugEnabled = !!value; };
+    return log;
+  };
+
+  const log = createLogger({
+    prefix: LOG_PREFIX,
+    storageKey: LOG_STORAGE_KEY,
+    maxEntries: LOG_MAX_ENTRIES,
+    debug: DEBUG
+  });
 
   function main() {
 
@@ -1186,11 +1268,11 @@ function appendCheckbox()
 		helpIcon.addEventListener('click', function(e) {
 			e.preventDefault();
 			e.stopPropagation();
-			console.log('Help icon clicked - showing popup'); // Debug log
+			log('info', 'Help popup opened');
 			showHelpPopup();
 		});
 	} else {
-		console.log('Help icon not found!'); // Debug log
+		log('warn', 'Help icon missing');
 	}
 	
 	// Assemble panel
@@ -1477,7 +1559,7 @@ function init()
 				  document.getElementsByName('q')[0];
 		
 		if (!textbox) {
-			console.log('Google Expert Search: Could not find Google search box');
+			log('warn', 'Search box missing');
 			return;
 		}
 		
@@ -1533,6 +1615,6 @@ if (document.readyState === 'loading') {
   try {
     main();
   } catch (err) {
-    console.error(LOG_PREFIX, 'fatal error', err);
+    log('error', 'fatal error', err);
   }
 })();
