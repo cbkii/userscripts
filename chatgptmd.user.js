@@ -109,7 +109,15 @@
     };
 
     const observeUiChanges = () => {
-        const observer = new MutationObserver(scheduleEnsureButtons);
+        let debounceId = 0;
+        const observer = new MutationObserver(() => {
+            if (document.querySelector("#exporter-buttons")) return;
+            if (debounceId) return;
+            debounceId = window.setTimeout(() => {
+                debounceId = 0;
+                scheduleEnsureButtons();
+            }, 250);
+        });
         observer.observe(document.documentElement, { childList: true, subtree: true });
     };
 
