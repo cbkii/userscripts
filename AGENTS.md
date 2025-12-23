@@ -61,7 +61,8 @@ Use these unless you have a strong reason not to:
 
 - `@name`
 - `@namespace` set to `https://github.com/cbkii/userscripts`
-- `@version` using datetime format `YYYY.MM.DD.HHMM` (e.g., `2025.12.23.2043`)
+- `@version` using datetime format `YYYY.MM.DD.HHMM` (e.g., `2025.12.23.2043`).
+  - Versions must never decrease. If a timestamp conflicts, increment the `HHMM` value by 1 (e.g., `2025.12.23.2043` -> `2025.12.23.2044`).
 - `@description` (concise English-only summary of main purpose and key features)
 - `@match` (preferred) or `@include`
 - `@run-at` (deliberate choice)
@@ -76,8 +77,6 @@ Use these unless you have a strong reason not to:
 - `@updateURL` and `@downloadURL` both set to the raw GitHub URL for the script on `main`, e.g.:
   - `https://raw.githubusercontent.com/cbkii/userscripts/main/<script>.user.js`
 - `@connect` (for any cross-origin network use)
-- `@updateURL` / `@downloadURL` (if you control distribution)
-- `@supportURL` / `@homepageURL` (if publishing)
 
 ### 2.4 Tampermonkey gotchas (important)
 - Tampermonkey requires at least one `@match` or `@include` for a script to run.
