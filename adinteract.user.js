@@ -424,8 +424,6 @@ bootstrap().catch((err) => {
             });
         });
     }
-
-    bootstrap();
     }
 
     try {
