@@ -413,7 +413,10 @@
 
         init();
     };
-
+bootstrap().catch((err) => {
+    log('warn', 'Bootstrap failed; continuing without exclusions:', err);
+    init();
+});
     if (typeof GM_registerMenuCommand === 'function') {
         GM_registerMenuCommand('Refresh ad-interaction exclusion list', () => {
             refreshExclusions().then(() => {
