@@ -276,8 +276,17 @@
     };
 
     const saveExclusions = (domains) => {
-        gmSet(EXCLUDE_CACHE_KEY, Array.from(domains));
-        gmSet(EXCLUDE_TS_KEY, Date.now());
+        const MAX_DOMAINS = 5000; // prevent storage quota issues
+        const arr = Array.from(domains).slice(0, MAX_DOMAINS);
+        try {
+            GM_setValue(EXCLUDE_CACHE_KEY, arr);
+            GM_setValue(EXCLUDE_TS_KEY, Date.now());
+            return true;
+        } catch (_) {
+            // If storage fails, at least try to persist the timestamp to avoid refetch loops.
+            try { GM_setValue(EXCLUDE_TS_KEY, Date.now()); } catch (_) {}
+            return false;
+        }
     };
 
     const shouldRefreshExclusions = () => {
