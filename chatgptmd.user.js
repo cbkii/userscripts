@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md + txt)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2.4
+// @version      2025.01.31.1200
 // @description  Exports ChatGPT conversations to Markdown or plain text with on-page buttons.
 // @author       cbcoz
 // @match        *://chat.openai.com/*

@@ -61,7 +61,7 @@ Use these unless you have a strong reason not to:
 
 - `@name`
 - `@namespace` set to `https://github.com/cbkii/userscripts`
-- `@version`
+- `@version` using datetime format `YYYY.MM.DD.HHMM` (e.g., `2025.12.23.2043`)
 - `@description` (concise English-only summary of main purpose and key features)
 - `@match` (preferred) or `@include`
 - `@run-at` (deliberate choice)

@@ -2,7 +2,7 @@
 // @name         Export Full Page Info (XBrowser)
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
-// @version      1.2.2
+// @version      2025.01.31.1200
 // @description  Exports HTML, scripts, styles, and resource timing to a text file.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      0.3.8
+// @version      2025.01.31.1200
 // @description  Converts a selected page element to Markdown with preview/export.
 // @author       cbkii (fork of shiquda)
 // @match        *://*/*
