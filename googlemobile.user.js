@@ -1,35 +1,34 @@
 // ==UserScript==
-// @name		Google Extra Search (Mobile)
-// @namespace	http://github.com/
-// @author      cbkii (mobile UI by Claude)
-// @description	Mobile Google search helper with filters, dorks, and a compact UI.
-// @version		3.1.2
-
-// @require     https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
-// @require     https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js
-
-// @match		*://www.google.*/*
-// @match		*://google.*/*
-// @exclude		*://www.google.*/imghp*
-// @exclude		*://www.google.*/analytics*
-// @exclude		*://www.google.*/preferences*
-// @exclude		*://www.google.*/advanced_search*
-// @exclude		*://www.google.*/language_tools*
-// @exclude		*://www.google.*/ig*
-// @exclude		*://www.google.*/support*
-// @exclude		*://www.google.*/webhp*
-// @exclude		*://*maps.google.*
-// @exclude		*://google.*/maps*
-// @exclude		*://*translate.google.*
-// @exclude		*://google*/ig*
-
-// @grant		GM_log
-// @grant		GM_addStyle
-// @grant		GM_getValue
-// @grant		GM_setValue
-// @grant		GM_getResourceText
-// @run-at		document-end
-
+// @name         Google Extra Search (Mobile)
+// @namespace    https://github.com/cbkii/userscripts
+// @author       cbkii (mobile UI by Claude)
+// @description  Mobile Google search helper with filters, dorks, and a compact UI.
+// @version      2025.01.31.1200
+// @require      https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
+// @require      https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js
+// @match        *://www.google.*/search*
+// @match        *://google.*/search*
+// @exclude      *://www.google.*/imghp*
+// @exclude      *://www.google.*/analytics*
+// @exclude      *://www.google.*/preferences*
+// @exclude      *://www.google.*/advanced_search*
+// @exclude      *://www.google.*/language_tools*
+// @exclude      *://www.google.*/ig*
+// @exclude      *://www.google.*/support*
+// @exclude      *://www.google.*/webhp*
+// @exclude      *://*maps.google.*
+// @exclude      *://google.*/maps*
+// @exclude      *://*translate.google.*
+// @exclude      *://google*/ig*
+// @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/googlemobile.user.js
+// @downloadURL  https://raw.githubusercontent.com/cbkii/userscripts/main/googlemobile.user.js
+// @homepageURL  https://github.com/cbkii/userscripts
+// @supportURL   https://github.com/cbkii/userscripts/issues
+// @grant        GM_addStyle
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @run-at       document-end
+// @noframes
 // ==/UserScript==
 
 /*

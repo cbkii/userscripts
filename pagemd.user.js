@@ -1,25 +1,27 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
-// @namespace    http://tampermonkey.net/
-// @version      0.3.6
+// @namespace    https://github.com/cbkii/userscripts
+// @version      2025.01.31.1200
 // @description  Converts a selected page element to Markdown with preview/export.
 // @author       cbkii (fork of shiquda)
 // @match        *://*/*
-// @namespace    https://github.com/shiquda/shiquda_UserScript
-// @supportURL   https://github.com/shiquda/shiquda_UserScript/issues
+// @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pagemd.user.js
+// @downloadURL  https://raw.githubusercontent.com/cbkii/userscripts/main/pagemd.user.js
+// @homepageURL  https://github.com/cbkii/userscripts
+// @supportURL   https://github.com/cbkii/userscripts/issues
+// @run-at       document-end
+// @noframes
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
 // @grant        GM_setClipboard
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @require      https://code.jquery.com/jquery-3.6.0.min.js
-// @require      https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js
-// @require      https://unpkg.com/turndown/dist/turndown.js
-// @require      https://unpkg.com/@guyplusplus/turndown-plugin-gfm/dist/turndown-plugin-gfm.js
+// @require      https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
+// @require      https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js
+// @require      https://cdnjs.cloudflare.com/ajax/libs/turndown/7.1.2/turndown.min.js
+// @require      https://cdnjs.cloudflare.com/ajax/libs/turndown-plugin-gfm/1.0.2/turndown-plugin-gfm.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js
 // @license      AGPL-3.0
-// @downloadURL https://update.greasyfork.org/scripts/486888/Easy%20Web%20Page%20to%20Markdown.user.js
-// @updateURL https://update.greasyfork.org/scripts/486888/Easy%20Web%20Page%20to%20Markdown.meta.js
 // ==/UserScript==
 
 /*
@@ -28,11 +30,11 @@
   - Shows a live preview with copy/download options and optional Obsidian export.
 
   How it works:
-  - Uses keyboard/mouse navigation to pick an element, then converts HTML to Markdown
+  - Uses tap-friendly controls to pick an element, then converts HTML to Markdown
     and renders a preview modal for copy or download.
 
   Configuration:
-  - Edit shortCutUserConfig and obsidianUserConfig to set shortcuts or vault paths.
+  - Edit obsidianUserConfig to set vault paths. Activate via the userscript menu.
 */
 
 
@@ -43,18 +45,6 @@
     const LOG_PREFIX = '[page-markdown]';
 
     function main() {
-
-    // User Config
-    // Short cut
-
-    const shortCutUserConfig = {
-        /* Example:
-        "Shift": false,
-        "Ctrl": true,
-        "Alt": false,
-        "Key": "m"
-        */
-    }
 
     // Obsidian
     const obsidianUserConfig = {
@@ -67,32 +57,17 @@
     }
 
     const guide = `
-- Use **arrow keys** to navigate elements
-    - Up: select the parent element
-    - Down: select the first child element
-    - Left: select the previous sibling element
-    - Right: select the next sibling element
-- Use the **mouse wheel** to zoom selection
-    - Up: select the parent element
-    - Down: select the first child element
-- Click an element to select it
-- Press \`Esc\` to cancel selection
+- Tap an element to highlight it
+- Use the on-screen toolbar to move the selection:
+    - Parent, Child, Prev, Next
+- Tap "Use selection" to export, or "Cancel" to exit
     `
 
     // Global state
     var isSelecting = false;
     var selectedElement = null;
-    let shortCutConfig, obsidianConfig;
-    // Load configuration
-    // Initialize shortcut configuration
-    let storedShortCutConfig = GM_getValue('shortCutConfig');
-    if (Object.keys(shortCutUserConfig).length !== 0) {
-        GM_setValue('shortCutConfig', JSON.stringify(shortCutUserConfig));
-        shortCutConfig = shortCutUserConfig;
-    } else if (storedShortCutConfig) {
-        shortCutConfig = JSON.parse(storedShortCutConfig);
-    }
-
+    var selectionToolbar = null;
+    let obsidianConfig;
     // Initialize Obsidian configuration
     let storedObsidianConfig = GM_getValue('obsidianConfig');
     if (Object.keys(obsidianUserConfig).length !== 0) {
@@ -229,9 +204,94 @@
     }
 
     // Start selection
+    function updateSelection(element) {
+        if (!element) return;
+        if (selectedElement) {
+            $(selectedElement).removeClass('h2m-selection-box');
+        }
+        selectedElement = element;
+        $(selectedElement).addClass('h2m-selection-box');
+    }
+
+    function normalizeSelection(element) {
+        if (!element) return null;
+        if (element.tagName === 'HTML') {
+            return document.body || element;
+        }
+        if (element.tagName === 'BODY') {
+            return element.firstElementChild || element;
+        }
+        return element;
+    }
+
+    function moveSelection(direction) {
+        if (!selectedElement) return;
+        let next = selectedElement;
+        switch (direction) {
+            case 'parent':
+                next = selectedElement.parentElement || selectedElement;
+                break;
+            case 'child':
+                next = selectedElement.firstElementChild || selectedElement;
+                break;
+            case 'prev': {
+                let prev = selectedElement.previousElementSibling;
+                while (!prev && selectedElement.parentElement) {
+                    selectedElement = selectedElement.parentElement;
+                    prev = selectedElement.previousElementSibling;
+                }
+                next = prev || selectedElement;
+                break;
+            }
+            case 'next': {
+                let nextEl = selectedElement.nextElementSibling;
+                while (!nextEl && selectedElement.parentElement) {
+                    selectedElement = selectedElement.parentElement;
+                    nextEl = selectedElement.nextElementSibling;
+                }
+                next = nextEl || selectedElement;
+                break;
+            }
+            default:
+                break;
+        }
+        updateSelection(normalizeSelection(next));
+    }
+
+    function buildToolbar() {
+        if (selectionToolbar) return;
+        selectionToolbar = $(`
+            <div class="h2m-toolbar">
+                <button class="h2m-btn-parent">Parent</button>
+                <button class="h2m-btn-child">Child</button>
+                <button class="h2m-btn-prev">Prev</button>
+                <button class="h2m-btn-next">Next</button>
+                <button class="h2m-btn-use">Use selection</button>
+                <button class="h2m-btn-cancel">Cancel</button>
+            </div>
+        `);
+
+        selectionToolbar.find('.h2m-btn-parent').on('click', () => moveSelection('parent'));
+        selectionToolbar.find('.h2m-btn-child').on('click', () => moveSelection('child'));
+        selectionToolbar.find('.h2m-btn-prev').on('click', () => moveSelection('prev'));
+        selectionToolbar.find('.h2m-btn-next').on('click', () => moveSelection('next'));
+        selectionToolbar.find('.h2m-btn-use').on('click', () => {
+            if (!selectedElement) return;
+            const markdown = convertToMarkdown(selectedElement);
+            showMarkdownModal(markdown);
+            endSelecting();
+        });
+        selectionToolbar.find('.h2m-btn-cancel').on('click', () => endSelecting());
+
+        $('body').append(selectionToolbar);
+    }
+
     function startSelecting() {
         $('body').addClass('h2m-no-scroll'); // Prevent page scrolling
         isSelecting = true;
+        const initial = normalizeSelection(document.activeElement || document.body);
+        updateSelection(initial);
+        buildToolbar();
         // Instructions
         tip(marked.parse(guide));
     }
@@ -242,6 +302,10 @@
         $('.h2m-selection-box').removeClass('h2m-selection-box');
         $('body').removeClass('h2m-no-scroll');
         $('.h2m-tip').remove();
+        if (selectionToolbar) {
+            selectionToolbar.remove();
+            selectionToolbar = null;
+        }
     }
 
     function tip(message, timeout = null) {
@@ -385,117 +449,53 @@
             box-shadow: 5px 5px 10px rgba(0, 0, 0, 0.5);
             background-color: rgba(255, 255, 255, 0.7);
         }
+        .h2m-toolbar {
+            position: fixed;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            background: rgba(0, 0, 0, 0.75);
+            padding: 10px 12px;
+            border-radius: 12px;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+        }
+        .h2m-toolbar button {
+            border: none;
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-size: 14px;
+            color: #fff;
+            background: #4CAF50;
+            cursor: pointer;
+        }
+        .h2m-toolbar .h2m-btn-cancel {
+            background: #f44336;
+        }
+        .h2m-toolbar .h2m-btn-use {
+            background: #2196f3;
+        }
     `);
 
     // Register triggers
-    shortCutConfig = shortCutConfig ? shortCutConfig : {
-        "Shift": false,
-        "Ctrl": true,
-        "Alt": false,
-        "Key": "m"
-    };
-    $(document).on('keydown', function (e) {
-        if (e.ctrlKey === shortCutConfig['Ctrl'] &&
-            e.altKey === shortCutConfig['Alt'] &&
-            e.shiftKey === shortCutConfig['Shift'] &&
-            e.key.toUpperCase() === shortCutConfig['Key'].toUpperCase()) {
-            e.preventDefault();
-            startSelecting();
-        }
-        // else {
-        //     console.log(e.ctrlKey, e.altKey, e.shiftKey, e.key.toUpperCase());
-        // }
-    });
-    // $(document).on('keydown', function (e) {
-    //     if (e.ctrlKey && e.key === 'm') {
-    //         e.preventDefault();
-    //         startSelecting()
-    //     }
-    // });
-
     GM_registerMenuCommand('Convert to Markdown', function () {
         startSelecting()
     });
 
 
+    const handleSelectEvent = function (e) {
+        if (!isSelecting) return;
+        if ($(e.target).closest('.h2m-toolbar, .h2m-modal, .h2m-modal-overlay, .h2m-tip').length) return;
+        e.preventDefault();
+        updateSelection(normalizeSelection(e.target));
+    };
 
-    $(document).on('mouseover', function (e) { // Start selection
-        if (isSelecting) {
-            $(selectedElement).removeClass('h2m-selection-box');
-            selectedElement = e.target;
-            $(selectedElement).addClass('h2m-selection-box');
-        }
-    }).on('wheel', function (e) { // Mouse wheel event
-        if (isSelecting) {
-            e.preventDefault();
-            if (e.originalEvent.deltaY < 0) {
-                selectedElement = selectedElement.parentElement ? selectedElement.parentElement : selectedElement; // Expand
-                if (selectedElement.tagName === 'HTML' || selectedElement.tagName === 'BODY') {
-                    selectedElement = selectedElement.firstElementChild;
-                }
-            } else {
-                selectedElement = selectedElement.firstElementChild ? selectedElement.firstElementChild : selectedElement; // Shrink
-            }
-            $('.h2m-selection-box').removeClass('h2m-selection-box');
-            $(selectedElement).addClass('h2m-selection-box');
-        }
-    }).on('keydown', function (e) { // Keyboard event
-        if (isSelecting) {
-            e.preventDefault();
-            if (e.key === 'Escape') {
-                endSelecting();
-                return;
-            }
-            switch (e.key) { // Arrow keys
-                case 'ArrowUp':
-                    selectedElement = selectedElement.parentElement ? selectedElement.parentElement : selectedElement; // Expand
-                    if (selectedElement.tagName === 'HTML' || selectedElement.tagName === 'BODY') { // Skip HTML and BODY
-                        selectedElement = selectedElement.firstElementChild;
-                    }
-                    break;
-                case 'ArrowDown':
-                    selectedElement = selectedElement.firstElementChild ? selectedElement.firstElementChild : selectedElement; // Shrink
-                    break;
-                case 'ArrowLeft': // Find the previous element; climb until a sibling is found
-                    var prev = selectedElement.previousElementSibling;
-                    while (prev === null && selectedElement.parentElement !== null) {
-                        selectedElement = selectedElement.parentElement;
-                        prev = selectedElement.previousElementSibling ? selectedElement.previousElementSibling.lastChild : null;
-                    }
-                    if (prev !== null) {
-                        if (selectedElement.tagName === 'HTML' || selectedElement.tagName === 'BODY') {
-                            selectedElement = selectedElement.firstElementChild;
-                        }
-                        selectedElement = prev;
-                    }
-                    break;
-                case 'ArrowRight':
-                    var next = selectedElement.nextElementSibling;
-                    while (next === null && selectedElement.parentElement !== null) {
-                        selectedElement = selectedElement.parentElement;
-                        next = selectedElement.nextElementSibling ? selectedElement.nextElementSibling.firstElementChild : null;
-                    }
-                    if (next !== null) {
-                        if (selectedElement.tagName === 'HTML' || selectedElement.tagName === 'BODY') {
-                            selectedElement = selectedElement.firstElementChild;
-                        }
-                        selectedElement = next;
-                    }
-                    break;
-            }
-
-            $('.h2m-selection-box').removeClass('h2m-selection-box');
-            $(selectedElement).addClass('h2m-selection-box'); // Update selection style
-        }
-    }
-    ).on('mousedown', function (e) { // Use mousedown to avoid triggering page handlers
-        if (isSelecting) {
-            e.preventDefault();
-            var markdown = convertToMarkdown(selectedElement);
-            showMarkdownModal(markdown);
-            endSelecting();
-        }
-    });
+    $(document)
+        .on('touchstart.h2m-select', handleSelectEvent)
+        .on('mousedown.h2m-select', handleSelectEvent);
 
     }
 

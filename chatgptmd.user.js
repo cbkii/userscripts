@@ -1,12 +1,15 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md + txt)
-// @namespace    https://tampermonkey-exporter.local
-// @version      2.2
+// @namespace    https://github.com/cbkii/userscripts
+// @version      2025.01.31.1200
 // @description  Exports ChatGPT conversations to Markdown or plain text with on-page buttons.
 // @author       cbcoz
 // @match        *://chat.openai.com/*
 // @match        *://chatgpt.com/*
-// @match        *://*hatgpt.com/*/*
+// @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/chatgptmd.user.js
+// @downloadURL  https://raw.githubusercontent.com/cbkii/userscripts/main/chatgptmd.user.js
+// @homepageURL  https://github.com/cbkii/userscripts
+// @supportURL   https://github.com/cbkii/userscripts/issues
 // @run-at       document-idle
 // @grant        none
 // ==/UserScript==
@@ -85,14 +88,54 @@
 
     const turndown = new TurndownService();
 
-    // 🔁 Wait for input area to exist
-    const interval = setInterval(() => {
-        const inputWrapper = document.querySelector("form")?.parentElement;
-        if (!document.querySelector("#exporter-buttons")) {
-            clearInterval(interval);
+    const findInputWrapper = () => document.querySelector("form")?.parentElement || null;
+
+    let ensureScheduled = false;
+    const scheduleEnsureButtons = () => {
+        if (ensureScheduled) return;
+        ensureScheduled = true;
+        requestAnimationFrame(() => {
+            ensureScheduled = false;
+            ensureButtons();
+        });
+    };
+
+    const ensureButtons = () => {
+        if (document.querySelector("#exporter-buttons")) return;
+        const inputWrapper = findInputWrapper();
+        if (inputWrapper) {
             injectButtons(inputWrapper);
         }
-    }, 500);
+    };
+
+    const observeUiChanges = () => {
+        let debounceId = 0;
+        const observer = new MutationObserver(() => {
+            if (document.querySelector("#exporter-buttons")) return;
+            if (debounceId) return;
+            debounceId = window.setTimeout(() => {
+                debounceId = 0;
+                scheduleEnsureButtons();
+            }, 250);
+        });
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+    };
+
+    const wrapHistory = (method) => {
+        const original = history[method];
+        if (!original) return;
+        history[method] = function (...args) {
+            const result = original.apply(this, args);
+            scheduleEnsureButtons();
+            return result;
+        };
+    };
+
+    wrapHistory('pushState');
+    wrapHistory('replaceState');
+    window.addEventListener('popstate', scheduleEnsureButtons);
+    observeUiChanges();
+    scheduleEnsureButtons();
 
     // 📦 Inject export buttons
     function injectButtons(container) {
@@ -160,16 +203,31 @@
             text-align: center;
         `;
 
-        popup.innerHTML = `
-            <div style="margin-bottom: 12px; font-weight: bold;">📤 Export Chat As</div>
-            <button style="${btnStyle()}" onclick="window.__EXPORT_CHAT__('md')">📄 Markdown (.md)</button>
-            <button style="${btnStyle()} margin-top:8px;" onclick="window.__EXPORT_CHAT__('txt')">📝 Plain Text (.txt)</button>
-            <button style="${btnStyle()} background:#ccc; color:#000; margin-top:12px;" onclick="this.parentElement.remove()">❌ Cancel</button>
-        `;
+        const title = document.createElement("div");
+        title.textContent = "📤 Export Chat As";
+        title.style.cssText = "margin-bottom: 12px; font-weight: bold;";
+
+        const mdBtn = document.createElement("button");
+        mdBtn.textContent = "📄 Markdown (.md)";
+        mdBtn.style.cssText = btnStyle();
+        mdBtn.addEventListener('click', () => exportChat("md"));
+
+        const txtBtn = document.createElement("button");
+        txtBtn.textContent = "📝 Plain Text (.txt)";
+        txtBtn.style.cssText = `${btnStyle()} margin-top:8px;`;
+        txtBtn.addEventListener('click', () => exportChat("txt"));
+
+        const cancelBtn = document.createElement("button");
+        cancelBtn.textContent = "❌ Cancel";
+        cancelBtn.style.cssText = `${btnStyle()} background:#ccc; color:#000; margin-top:12px;`;
+        cancelBtn.addEventListener('click', () => popup.remove());
+
+        popup.appendChild(title);
+        popup.appendChild(mdBtn);
+        popup.appendChild(txtBtn);
+        popup.appendChild(cancelBtn);
 
         document.body.appendChild(popup);
-
-        if (!window.__EXPORT_CHAT__) window.__EXPORT_CHAT__ = exportChat;
     }
 
     // 🧠 Export chat content
@@ -220,11 +278,10 @@
     // 💾 Mobile-friendly base64 downloader
     function mobileDownload(content, filename, mimeType = "text/plain") {
         try {
-            const base64Content = btoa(unescape(encodeURIComponent(content)));
-            const dataUri = `data:${mimeType};base64,${base64Content}`;
-
+            const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+            const blobUrl = URL.createObjectURL(blob);
             const link = document.createElement("a");
-            link.href = dataUri;
+            link.href = blobUrl;
             link.download = filename;
             link.style.cssText = "position:absolute;left:-9999px;top:-9999px;opacity:0;";
             document.body.appendChild(link);
@@ -234,14 +291,36 @@
                 bubbles: true,
                 cancelable: true
             });
-
             link.dispatchEvent(clickEvent);
-            setTimeout(() => link.remove(), 500);
+
+            setTimeout(() => {
+                link.remove();
+                try { URL.revokeObjectURL(blobUrl); } catch (_) {}
+            }, 500);
             return true;
         } catch (err) {
-            console.error("Download failed:", err);
-            alert("❗ Download failed. Try copying manually.");
-            return false;
+            try {
+                const base64Content = btoa(unescape(encodeURIComponent(content)));
+                const dataUri = `data:${mimeType};base64,${base64Content}`;
+                const link = document.createElement("a");
+                link.href = dataUri;
+                link.download = filename;
+                link.style.cssText = "position:absolute;left:-9999px;top:-9999px;opacity:0;";
+                document.body.appendChild(link);
+
+                const clickEvent = new MouseEvent("click", {
+                    view: window,
+                    bubbles: true,
+                    cancelable: true
+                });
+                link.dispatchEvent(clickEvent);
+                setTimeout(() => link.remove(), 500);
+                return true;
+            } catch (fallbackErr) {
+                console.error("Download failed:", fallbackErr);
+                alert("❗ Download failed. Try copying manually.");
+                return false;
+            }
         }
     }
 

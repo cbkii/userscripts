@@ -1,10 +1,16 @@
 // ==UserScript==
 // @name         Router Contrast Dark Mode
-// @namespace    http://tampermonkey.net/
-// @version      2.3
+// @namespace    https://github.com/cbkii/userscripts
+// @version      2025.01.31.1200
 // @description  High-contrast dark mode for the VX230V router UI.
 // @match        http://192.168.1.1/*
 // @match        https://192.168.1.1/*
+// @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/vxdark.user.js
+// @downloadURL  https://raw.githubusercontent.com/cbkii/userscripts/main/vxdark.user.js
+// @homepageURL  https://github.com/cbkii/userscripts
+// @supportURL   https://github.com/cbkii/userscripts/issues
+// @run-at       document-end
+// @noframes
 // @grant        GM_addStyle
 // ==/UserScript==
 
@@ -110,6 +116,8 @@
   `);
 
   /************ DOM Override: map-icon text colour ************/
+  const observers = [];
+
   function forceMapIconColor(node) {
     if (!node || node.nodeType !== 1) return;
     if (node.matches && node.matches('.map-icon, .map-icon-num')) {
@@ -142,6 +150,7 @@
     attributes: true,
     attributeFilter: ['class', 'style']
   });
+  observers.push(mo);
 
   /************ Keep #main background override ************/
   const main = document.getElementById('main');
@@ -153,7 +162,14 @@
     applyMainStyle();
     const mainObserver = new MutationObserver(applyMainStyle);
     mainObserver.observe(main, { attributes: true, childList: true, subtree: false });
+    observers.push(mainObserver);
   }
+
+  window.addEventListener('beforeunload', () => {
+    observers.forEach((observer) => {
+      try { observer.disconnect(); } catch (_) {}
+    });
+  });
 
   }
 
