@@ -2,7 +2,7 @@
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://example.invalid/antiads-all
 // @version      8.2.0
-// @description  Universal Anti-Adblock Detection
+// @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @match        *://*/*
 // @run-at       document-start
@@ -15,18 +15,27 @@
 // @connect      *
 // ==/UserScript==
 
+/*
+  Feature summary:
+  - Detects and neutralizes common anti-adblock overlays and gating scripts.
+  - Uses remote filter lists with optional legacy fallbacks.
+  - Provides a simple on-screen UI to adjust profiles and settings.
+
+  How it works:
+  - Fetches and caches rule sources, then applies safe cosmetic fixes and scriptlets.
+  - Includes multiple profiles (light/medium/nuclear) to scale aggressiveness.
+  - Applies fixes at document-start and after DOM readiness for dynamic pages.
+
+  Configuration:
+  - Update DEFAULTS and profile settings inside main() to tune behavior.
+*/
+
 (() => {
   'use strict';
 
-  /* ------------------------------------------------------------------
-     CORE GOALS
-     - Keep global @match, but make it easy to disable per-site.
-     - Prefer maintained upstream lists (ABP/uBO/AdGuard style).
-     - Keep legacy handlers as fallback
-     - Breakage-prone features stay in NUCLEAR only.
-     - Provide on-screen config UI; reduce Tampermonkey menu clutter. Ensure onscreen UI persists.
-     - Cache parsed remote rules and per-host match results for performance.
-  ------------------------------------------------------------------ */
+  const LOG_PREFIX = '[antiadblock]';
+
+  function main() {
 
   /* -----------------------------
      Version / Keys
@@ -1360,4 +1369,11 @@
     }
   })();
 
+  }
+
+  try {
+    main();
+  } catch (err) {
+    console.error(LOG_PREFIX, 'fatal error', err);
+  }
 })();

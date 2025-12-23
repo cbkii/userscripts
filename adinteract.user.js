@@ -1,16 +1,38 @@
 // ==UserScript==
 // @name         Ad Interaction Gate Unlocker
 // @namespace    https://example.com/universal-ad-interaction-bypass-proximity
-// @version      2025.2.2
-// @description  Bypasses ad interaction gates and locks via user clicks (3+ times, multiple triggers allowed). Intelligently finds nearby ad-containing elements if clicked area is blocked. Gated auto-actions (scans, timers) run only after first trigger. Expanded from GreasyFork, Reddit, GitHub.
+// @version      2025.2.3
+// @description  Unlocks ad interaction gates after repeated clicks with optional auto-actions.
 // @author       cbkii
+// @match        *://*/*
 // @grant        unsafeWindow
 // @grant        GM_addStyle
 // @run-at       document-start
 // ==/UserScript==
 
+/*
+  Feature summary:
+  - Unlocks ad interaction gates after repeated user clicks.
+  - Can auto-trigger nearby ad elements once the first manual trigger occurs.
+  - Applies optional CSS overrides and event patching to unblock UI elements.
+
+  How it works:
+  - Counts clicks per element; after the threshold, it simulates interactions
+    and enables gated buttons/links.
+  - Optional auto-actions run only after the first manual trigger.
+
+  Configuration:
+  - Edit the "config" object inside main() to adjust thresholds, delays,
+    and which features are enabled.
+*/
+
 (function() {
     'use strict';
+
+    const DEBUG = false;
+    const LOG_PREFIX = '[ad-interaction]';
+
+    function main() {
 
     // Configuration
     const config = {
@@ -31,8 +53,8 @@
 
     // Utility functions
     const log = (level, ...args) => {
-        if (config.debugMode || config.logLevel === 'debug') {
-            console[level === 'debug' ? 'log' : level](`[Ad Gate Bypass]`, ...args);
+        if (DEBUG || config.debugMode || config.logLevel === 'debug') {
+            console[level === 'debug' ? 'log' : level](`${LOG_PREFIX}`, ...args);
         }
     };
     const showToast = (msg) => {
@@ -194,4 +216,11 @@
     };
 
     init();
+    }
+
+    try {
+        main();
+    } catch (err) {
+        console.error(LOG_PREFIX, 'fatal error', err);
+    }
 })();

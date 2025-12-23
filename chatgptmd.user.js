@@ -2,16 +2,35 @@
 // @name         ChatGPT Exporter for Android (md + txt)
 // @namespace    https://tampermonkey-exporter.local
 // @version      2.2
-// @description  Export ChatGPT conversations as Markdown or Plain Text with mobile-friendly buttons and reliable formatting. Optimized for XBrowser + Android userscripts.
+// @description  Exports ChatGPT conversations to Markdown or plain text with on-page buttons.
 // @author       cbcoz
 // @match        *://chat.openai.com/*
 // @match        *://chatgpt.com/*
 // @match        *://*hatgpt.com/*/*
+// @run-at       document-idle
 // @grant        none
 // ==/UserScript==
 
+/*
+  Feature summary:
+  - Adds export buttons to save ChatGPT chats as Markdown or plain text.
+  - Provides a quick export button and an options popup.
+
+  How it works:
+  - Waits for the input area, injects buttons, then converts message HTML
+    to Markdown before downloading via a data URI.
+
+  Configuration:
+  - No user settings; behavior is controlled by the on-page buttons.
+*/
+
 (function () {
     'use strict';
+
+    const DEBUG = false;
+    const LOG_PREFIX = '[chatgpt-exporter]';
+
+    function main() {
 
     // ✅ Minimal Turndown-like HTML → Markdown
     class TurndownService {
@@ -226,4 +245,11 @@
         }
     }
 
+    }
+
+    try {
+        main();
+    } catch (err) {
+        console.error(LOG_PREFIX, 'fatal error', err);
+    }
 })();

@@ -34,6 +34,11 @@ A change is complete only when all items below are true:
   - idempotent DOM changes (safe to run multiple times)
   - optional teardown/disable logic when feasible
 - Use a consistent log prefix and a `DEBUG` switch.
+- Use English-only comments and user-facing strings.
+- Add a top-of-file comment block (after metadata, before code) with:
+  - Feature summary
+  - How it works
+  - Configuration notes
 
 ---
 
@@ -51,7 +56,7 @@ Use these unless you have a strong reason not to:
 - `@name`
 - `@namespace`
 - `@version`
-- `@description`
+- `@description` (concise English-only summary of main purpose and key features)
 - `@match` (preferred) or `@include`
 - `@run-at` (deliberate choice)
 - `@grant` (explicit list; see below)
@@ -269,7 +274,7 @@ When targeting XBrowser:
 // @name         <Script Name>
 // @namespace    https://example.com/userscripts
 // @version      0.1.0
-// @description  <What it does>
+// @description  <Concise English summary of purpose and key features>
 // @author       <You>
 // @match        https://example.com/*
 // @run-at       document-idle
@@ -278,6 +283,17 @@ When targeting XBrowser:
 // @grant        GM_getValue
 // @grant        GM_setValue
 // ==/UserScript==
+
+/*
+  Feature summary:
+  - <Bullet list of key capabilities>
+
+  How it works:
+  - <High-level flow in 1-3 bullets>
+
+  Configuration:
+  - <What users can change and where>
+*/
 
 (() => {
   'use strict';
