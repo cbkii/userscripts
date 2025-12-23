@@ -2,6 +2,8 @@
 
 This repository contains **userscripts**. Developer agents (Codex/Copilot/etc.) must follow this guide when creating or updating scripts so they remain **fast, safe, maintainable, and portable** across script managers — with **Android XBrowser compatibility prioritised above all**.
 
+**Mandatory API reference:** every userscript must be authored with a deep understanding of the repository API guidance in **[API-doc.md](./API-doc.md)**. Review it before designing behavior, metadata, permissions, or DOM interactions, and keep it open while implementing changes.
+
 ---
 
 ## 0) What “done” means
@@ -16,6 +18,7 @@ A change is complete only when all items below are true:
   - **XBrowser** (Android) using its built-in script manager (priority)
 - Clear manual test steps are included in the PR/commit message or `docs/<script>.md`.
 - `@version` is bumped for any functional change, and update hosting behaviour is correct.
+- API usage aligns with **[API-doc.md](./API-doc.md)** (read and applied for every script change).
 
 ---
 
@@ -62,7 +65,7 @@ Use these unless you have a strong reason not to:
 - `@name`
 - `@namespace` set to `https://github.com/cbkii/userscripts`
 - `@version` using datetime format `YYYY.MM.DD.HHMM` (e.g., `2025.12.23.2043`).
-  - Versions must never decrease. If a timestamp conflicts, increment the `HHMM` value by 1 (e.g., `2025.12.23.2043` -> `2025.12.23.2044`).
+  - Use the **current UTC datetime** at the moment you code or commit. If that is not possible, use the file’s modified time (UTC). If neither is possible or it conflicts, **increment by 1 minute** (HHMM + 1). Versions must never decrease.
 - `@description` (concise English-only summary of main purpose and key features)
 - `@match` (preferred) or `@include`
 - `@run-at` (deliberate choice)
@@ -343,12 +346,13 @@ When asked to build or update a script:
 4. List required permissions:
    - `@grant` APIs
    - `@connect` domains (if any)
-5. Implement:
+5. Review and apply the guidance in **[API-doc.md](./API-doc.md)** before implementing.
+6. Implement:
    - idempotent DOM updates
    - SPA-safe navigation handling (if needed)
    - minimal UI and toggles (menu commands) where helpful
-6. Update `@version` and update URLs (if applicable).
-7. Provide a **manual test plan**:
+7. Update `@version` and update URLs (if applicable).
+8. Provide a **manual test plan**:
    - happy path
    - negative path (excluded pages, missing elements)
    - SPA navigation (if relevant)
@@ -358,6 +362,7 @@ When asked to build or update a script:
 
 ## 14) References (for agents)
 
+- **[API-doc.md](./API-doc.md)** (required reading; authoritative API guidance for all scripts)
 - Tampermonkey documentation (metadata, grants, APIs, sandbox, updates)
 - Tampermonkey changelog (behaviour changes, MV3 notes)
 - Chrome match patterns documentation (for `@match` semantics)
