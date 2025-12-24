@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0055
+// @version      2025.12.24.0105
 // @description  Converts a selected page element to Markdown with preview/export.
 // @author       cbkii (fork of shiquda)
 // @match        *://*/*
@@ -16,6 +16,7 @@
 // @grant        GM_setClipboard
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_download
 // @require      https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
 // @require      https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/turndown/7.1.2/turndown.min.js
@@ -227,14 +228,51 @@
         });
 
         $modal.find('.h2m-download').on('click', function () { // Download
-            var markdown = $modal.find('textarea').val();
-            var blob = new Blob([markdown], { type: 'text/markdown' });
-            var url = URL.createObjectURL(blob);
-            var a = document.createElement('a');
-            a.href = url;
-            // Page title + timestamp
-            a.download = `${document.title}-${new Date().toISOString().replace(/:/g, '-')}.md`;
-            a.click();
+            const markdown = $modal.find('textarea').val();
+            const filename = `${document.title}-${new Date().toISOString().replace(/:/g, '-')}.md`;
+            const gmDownloadFn = typeof GM_download === 'function'
+                ? GM_download
+                : (typeof GM !== 'undefined' && typeof GM.download === 'function'
+                    ? GM.download.bind(GM)
+                    : null);
+            const startDownload = (blob) => {
+                const url = URL.createObjectURL(blob);
+                const cleanup = () => {
+                    try {
+                        URL.revokeObjectURL(url);
+                    } catch (_) {
+                        // ignore
+                    }
+                };
+
+                if (gmDownloadFn) {
+                    try {
+                        gmDownloadFn({
+                            url,
+                            name: filename,
+                            saveAs: false,
+                            onload: cleanup,
+                            ontimeout: cleanup,
+                            onerror: cleanup
+                        });
+                        return;
+                    } catch (_) {
+                        cleanup();
+                    }
+                }
+
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    cleanup();
+                }, 0);
+            };
+
+            startDownload(new Blob([markdown], { type: 'text/markdown' }));
         });
 
         $modal.find('.h2m-obsidian-select').on('change', function () { // Send to Obsidian

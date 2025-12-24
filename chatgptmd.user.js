@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0055
+// @version      2025.12.24.0105
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions.
 // @author       cbcoz
 // @match        *://chat.openai.com/*
@@ -12,6 +12,7 @@
 // @supportURL   https://github.com/cbkii/userscripts/issues
 // @run-at       document-idle
 // @noframes
+// @grant        GM_download
 // @grant        GM_setClipboard
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -939,9 +940,47 @@
   }
 
   function mobileDownload(content, filename, mimeType = 'text/plain') {
+    const gmDownloadFn = typeof GM_download === 'function'
+      ? GM_download
+      : (typeof GM !== 'undefined' && typeof GM.download === 'function'
+        ? GM.download.bind(GM)
+        : null);
+
+    let blobUrl = '';
+    const revokeBlobUrl = () => {
+      if (!blobUrl) return;
+      try {
+        URL.revokeObjectURL(blobUrl);
+      } catch (_) {
+        // ignore
+      }
+      blobUrl = '';
+    };
+
+    if (gmDownloadFn) {
+      try {
+        blobUrl = URL.createObjectURL(new Blob([content], { type: `${mimeType};charset=utf-8` }));
+        gmDownloadFn({
+          url: blobUrl,
+          name: filename,
+          saveAs: false,
+          onload: revokeBlobUrl,
+          ontimeout: revokeBlobUrl,
+          onerror: (err) => {
+            revokeBlobUrl();
+            log('warn', 'GM_download failed, falling back', err);
+          }
+        });
+        return true;
+      } catch (gmErr) {
+        revokeBlobUrl();
+        log('warn', 'GM_download threw; falling back to anchor', gmErr);
+      }
+    }
+
     try {
       const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
-      const blobUrl = URL.createObjectURL(blob);
+      blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;
       link.download = filename;
@@ -957,14 +996,11 @@
 
       setTimeout(() => {
         link.remove();
-        try {
-          URL.revokeObjectURL(blobUrl);
-        } catch (_) {
-          // no-op
-        }
+        revokeBlobUrl();
       }, 500);
       return true;
     } catch (error) {
+      revokeBlobUrl();
       try {
         const base64Content = btoa(unescape(encodeURIComponent(content)));
         const dataUri = `data:${mimeType};base64,${base64Content}`;
