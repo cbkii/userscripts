@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0251
+// @version      2025.12.24.0319
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions.
 // @author       cbcoz
 // @match        *://chat.openai.com/*
@@ -967,18 +967,32 @@
     };
 
     let blobUrl = '';
+    let blobUrlStale = false;
+    let blobUrlRevoked = false;
+    const createBlob = () => new Blob([content], { type: `${mimeType};charset=utf-8` });
+    const buildUrl = () => {
+      if (blobUrl && !blobUrlStale) return blobUrl;
+      if (blobUrl && !blobUrlRevoked) {
+        try { URL.revokeObjectURL(blobUrl); } catch (_) {}
+      }
+      blobUrl = URL.createObjectURL(createBlob());
+      blobUrlStale = false;
+      blobUrlRevoked = false;
+      return blobUrl;
+    };
     const revokeBlobUrl = () => {
-      if (!blobUrl) return;
+      if (blobUrlRevoked) return;
+      const activeUrl = buildUrl();
       try {
-        URL.revokeObjectURL(blobUrl);
+        URL.revokeObjectURL(activeUrl);
       } catch (_) {
         // ignore
       }
       blobUrl = '';
+      blobUrlRevoked = true;
+      blobUrlStale = false;
     };
-
-    const createBlob = () => new Blob([content], { type: `${mimeType};charset=utf-8` });
-    const startSafetyTimer = (cleanup) => setTimeout(cleanup, 15000);
+    const startSafetyTimer = (markStale) => setTimeout(markStale, 15000);
 
     const fallbackToDataUrl = () => {
       try {
@@ -1005,28 +1019,28 @@
 
     if (gmDownloadFn) {
       try {
-        blobUrl = URL.createObjectURL(createBlob());
+        blobUrl = buildUrl();
         const cleanup = () => revokeBlobUrl();
-        const safetyTimer = startSafetyTimer(cleanup);
+        const safetyTimer = startSafetyTimer(() => { blobUrlStale = true; });
         const wrappedCleanup = () => {
           clearTimeout(safetyTimer);
           cleanup();
         };
         gmDownloadFn({
-          url: blobUrl,
+          url: buildUrl(),
           name: filename,
           saveAs: false,
           onload: wrappedCleanup,
           ontimeout: wrappedCleanup,
           onerror: (err) => {
             log('warn', 'GM_download failed; falling back', err);
-            anchorDownload(blobUrl, wrappedCleanup);
+            anchorDownload(buildUrl(), wrappedCleanup);
           }
         })
         ?.then?.(() => wrappedCleanup())
         ?.catch?.((err) => {
           log('warn', 'GM_download promise rejected; falling back', err);
-          anchorDownload(blobUrl, wrappedCleanup);
+          anchorDownload(buildUrl(), wrappedCleanup);
         });
         return true;
       } catch (gmErr) {
@@ -1035,14 +1049,14 @@
     }
 
     try {
-      blobUrl = URL.createObjectURL(createBlob());
+      blobUrl = buildUrl();
       const cleanup = () => revokeBlobUrl();
-      const safetyTimer = startSafetyTimer(cleanup);
+      const safetyTimer = startSafetyTimer(() => { blobUrlStale = true; });
       const wrappedCleanup = () => {
         clearTimeout(safetyTimer);
         cleanup();
       };
-      anchorDownload(blobUrl, wrappedCleanup);
+      anchorDownload(buildUrl(), wrappedCleanup);
       return true;
     } catch (error) {
       revokeBlobUrl();

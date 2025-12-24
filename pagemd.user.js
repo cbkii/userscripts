@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0251
+// @version      2025.12.24.0319
 // @description  Converts a selected page element to Markdown with preview/export.
 // @author       cbkii (fork of shiquda)
 // @match        *://*/*
@@ -251,20 +251,35 @@
                 }, 500);
             };
             const startDownload = (blob) => {
-                const url = URL.createObjectURL(blob);
+                let url = '';
+                let urlStale = false;
+                let urlRevoked = false;
+                const buildUrl = () => {
+                    if (url && !urlStale) return url;
+                    if (url && !urlRevoked) {
+                        try { URL.revokeObjectURL(url); } catch (_) {}
+                    }
+                    url = URL.createObjectURL(blob);
+                    urlStale = false;
+                    urlRevoked = false;
+                    return url;
+                };
                 const cleanup = (() => {
                     let cleaned = false;
                     return () => {
                         if (cleaned) return;
                         cleaned = true;
+                        const activeUrl = buildUrl();
                         try {
-                            URL.revokeObjectURL(url);
+                            URL.revokeObjectURL(activeUrl);
                         } catch (_) {
                             // ignore
                         }
+                        urlRevoked = true;
+                        url = '';
                     };
                 })();
-                const safetyTimer = setTimeout(cleanup, 15000);
+                const safetyTimer = setTimeout(() => { urlStale = true; }, 15000);
                 const wrappedCleanup = () => {
                     clearTimeout(safetyTimer);
                     cleanup();
@@ -273,19 +288,19 @@
                 if (gmDownloadFn) {
                     try {
                         gmDownloadFn({
-                            url,
+                            url: buildUrl(),
                             name: filename,
                             saveAs: false,
                             onload: wrappedCleanup,
                             ontimeout: wrappedCleanup,
                             onerror: (err) => {
                                 log('warn', 'GM_download failed, falling back', err);
-                                anchorDownload(url, wrappedCleanup);
+                                anchorDownload(buildUrl(), wrappedCleanup);
                             }
                         })?.then?.(() => wrappedCleanup())
                           ?.catch?.((err) => {
                               log('warn', 'GM_download promise rejected, falling back', err);
-                              anchorDownload(url, wrappedCleanup);
+                              anchorDownload(buildUrl(), wrappedCleanup);
                           });
                         return;
                     } catch (err) {
@@ -294,7 +309,7 @@
                     }
                 }
 
-                anchorDownload(url, wrappedCleanup);
+                anchorDownload(buildUrl(), wrappedCleanup);
             };
 
             startDownload(new Blob([markdown], { type: 'text/markdown' }));
