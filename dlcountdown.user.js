@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.01.31.1200
+// @version      2025.12.24.0055
 // @description  Accelerates download countdown timers and enables download controls.
 // @author       cbkii
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:up|down|load|dl|mirror|drain|transfer)[a-z0-9-]*|[a-z0-9-]*(?:up|down|load|dl|mirror|drain|transfer))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
@@ -39,7 +39,92 @@
     'use strict';
 
     const DEBUG = false;
-    const LOG_PREFIX = '[dlcountdown]';
+    const LOG_PREFIX = '[dlcnt]';
+    const LOG_STORAGE_KEY = 'userscript.logs.dlcountdown';
+    const LOG_MAX_ENTRIES = 200;
+
+    const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
+        let debugEnabled = !!debug;
+        const SENSITIVE_KEY_RE = /pass(word)?|token|secret|auth|session|cookie|key/i;
+        const scrubString = (value) => {
+            if (typeof value !== 'string') return '';
+            let text = value.replace(
+                /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
+                '$1$2=[redacted]'
+            );
+            if (/^https?:\\/\\//i.test(text)) {
+                try {
+                    const url = new URL(text);
+                    text = `${url.origin}${url.pathname}`;
+                } catch (_) {}
+            }
+            return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+        };
+        const describeElement = (value) => {
+            if (!value || !value.tagName) return 'element';
+            const id = value.id ? `#${value.id}` : '';
+            const classes = value.classList && value.classList.length
+                ? `.${Array.from(value.classList).slice(0, 2).join('.')}`
+                : '';
+            return `${value.tagName.toLowerCase()}${id}${classes}`;
+        };
+        const scrubValue = (value, depth = 0) => {
+            if (value == null) return value;
+            if (typeof value === 'string') return scrubString(value);
+            if (value instanceof Error) {
+                return { name: value.name, message: scrubString(value.message) };
+            }
+            if (typeof Element !== 'undefined' && value instanceof Element) {
+                return describeElement(value);
+            }
+            if (typeof value === 'object') {
+                if (depth >= 1) return '[truncated]';
+                if (Array.isArray(value)) {
+                    return value.slice(0, 4).map((item) => scrubValue(item, depth + 1));
+                }
+                const out = {};
+                Object.keys(value).slice(0, 4).forEach((key) => {
+                    out[key] = SENSITIVE_KEY_RE.test(key)
+                        ? '[redacted]'
+                        : scrubValue(value[key], depth + 1);
+                });
+                return out;
+            }
+            return value;
+        };
+        const writeEntry = async (level, message, meta) => {
+            try {
+                const existing = await Promise.resolve(GM_getValue(storageKey, []));
+                const list = Array.isArray(existing) ? existing : [];
+                list.push({ ts: new Date().toISOString(), level, message, meta });
+                if (list.length > maxEntries) {
+                    list.splice(0, list.length - maxEntries);
+                }
+                await Promise.resolve(GM_setValue(storageKey, list));
+            } catch (_) {}
+        };
+        const log = (level, message, meta) => {
+            if (level === 'debug' && !debugEnabled) return;
+            const msg = typeof message === 'string' ? scrubString(message) : 'event';
+            const data = typeof message === 'string' ? meta : message;
+            const sanitized = data === undefined ? undefined : scrubValue(data);
+            writeEntry(level, msg, sanitized).catch(() => {});
+            if (debugEnabled || level === 'warn' || level === 'error') {
+                const method = level === 'debug' ? 'log' : level;
+                const payload = sanitized === undefined ? [] : [sanitized];
+                console[method](prefix, msg, ...payload);
+            }
+        };
+        log.setDebug = (value) => { debugEnabled = !!value; };
+        return log;
+    };
+
+    const log = createLogger({
+        prefix: LOG_PREFIX,
+        storageKey: LOG_STORAGE_KEY,
+        maxEntries: LOG_MAX_ENTRIES,
+        debug: DEBUG
+    });
 
     function main() {
 
@@ -48,6 +133,7 @@
     const MIN_INTERVAL_MS = 10;       // Minimum interval to prevent browser throttling
     const MAX_INTERVAL_MS = 1000;     // Maximum interval we'll consider a timer
     const STORAGE_KEY = 'download_timer_accelerator_enabled';
+
     
     // State management
     let isEnabled = GM_getValue(STORAGE_KEY, false);
@@ -541,7 +627,7 @@
             }, 4000);
             
         } catch (e) {
-            console.log('Timer Accelerator:', message);
+            log('info', 'State update', message);
         }
     }
     
@@ -579,7 +665,7 @@
     
     // Initialize the script
     function initialize() {
-        console.log('Download Timer Accelerator Pro v2.5.0 initializing...');
+        log('info', 'Init');
         
         // Initialize core acceleration system
         timerAccelerator.initializeAcceleration();
@@ -595,8 +681,8 @@
             }
         });
         
-        console.log(`Timer Accelerator initialized. Status: ${isEnabled ? 'ENABLED' : 'DISABLED'}`);
-        console.log('Use Ctrl+Alt+T to toggle, or use the Tampermonkey menu');
+        log('info', `Status: ${isEnabled ? 'enabled' : 'disabled'}`);
+        log('info', 'Toggle: Ctrl+Alt+T or userscript menu');
         
         // Show status on enabled sites
         if (isEnabled) {
@@ -622,6 +708,6 @@
     try {
         main();
     } catch (err) {
-        console.error(LOG_PREFIX, 'fatal error', err);
+        log('error', 'fatal error', err);
     }
 })();

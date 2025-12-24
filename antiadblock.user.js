@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.01.31.1200
+// @version      2025.12.24.0055
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @match        *://*/*
@@ -46,7 +46,94 @@
 (() => {
   'use strict';
 
-  const LOG_PREFIX = '[antiadblock]';
+  const LOG_PREFIX = '[aab]';
+  const LOG_STORAGE_KEY = 'userscript.logs.antiadblock';
+  const LOG_MAX_ENTRIES = 200;
+  let DEBUG = false;
+
+  const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
+    let debugEnabled = !!debug;
+    const SENSITIVE_KEY_RE = /pass(word)?|token|secret|auth|session|cookie|key/i;
+    const scrubString = (value) => {
+      if (typeof value !== 'string') return '';
+      let text = value.replace(
+        /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
+        '$1$2=[redacted]'
+      );
+      if (/^https?:\\/\\//i.test(text)) {
+        try {
+          const url = new URL(text);
+          text = `${url.origin}${url.pathname}`;
+        } catch (_) {}
+      }
+      return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+    };
+    const describeElement = (value) => {
+      if (!value || !value.tagName) return 'element';
+      const id = value.id ? `#${value.id}` : '';
+      const classes = value.classList && value.classList.length
+        ? `.${Array.from(value.classList).slice(0, 2).join('.')}`
+        : '';
+      return `${value.tagName.toLowerCase()}${id}${classes}`;
+    };
+    const scrubValue = (value, depth = 0) => {
+      if (value == null) return value;
+      if (typeof value === 'string') return scrubString(value);
+      if (value instanceof Error) {
+        return { name: value.name, message: scrubString(value.message) };
+      }
+      if (typeof Element !== 'undefined' && value instanceof Element) {
+        return describeElement(value);
+      }
+      if (typeof value === 'object') {
+        if (depth >= 1) return '[truncated]';
+        if (Array.isArray(value)) {
+          return value.slice(0, 4).map((item) => scrubValue(item, depth + 1));
+        }
+        const out = {};
+        Object.keys(value).slice(0, 4).forEach((key) => {
+          out[key] = SENSITIVE_KEY_RE.test(key)
+            ? '[redacted]'
+            : scrubValue(value[key], depth + 1);
+        });
+        return out;
+      }
+      return value;
+    };
+    const writeEntry = async (level, message, meta) => {
+      try {
+        const existing = await Promise.resolve(GM_getValue(storageKey, []));
+        const list = Array.isArray(existing) ? existing : [];
+        list.push({ ts: new Date().toISOString(), level, message, meta });
+        if (list.length > maxEntries) {
+          list.splice(0, list.length - maxEntries);
+        }
+        await Promise.resolve(GM_setValue(storageKey, list));
+      } catch (_) {}
+    };
+    const log = (level, message, meta) => {
+      if (level === 'debug' && !debugEnabled) return;
+      const msg = typeof message === 'string' ? scrubString(message) : 'event';
+      const data = typeof message === 'string' ? meta : message;
+      const sanitized = data === undefined ? undefined : scrubValue(data);
+      writeEntry(level, msg, sanitized).catch(() => {});
+      if (debugEnabled || level === 'warn' || level === 'error') {
+        const method = level === 'debug' ? 'log' : level;
+        const payload = sanitized === undefined ? [] : [sanitized];
+        console[method](prefix, msg, ...payload);
+      }
+    };
+    log.setDebug = (value) => { debugEnabled = !!value; };
+    return log;
+  };
+
+  const log = createLogger({
+    prefix: LOG_PREFIX,
+    storageKey: LOG_STORAGE_KEY,
+    maxEntries: LOG_MAX_ENTRIES,
+    debug: DEBUG
+  });
+  const dbg = (...args) => log('debug', ...args);
 
   function main() {
 
@@ -186,13 +273,6 @@
     try { GM_deleteValue(STORAGE_PREFIX + k); } catch (_) {}
   };
 
-  /* -----------------------------
-     Logging
-  ----------------------------- */
-  let DEBUG = false;
-  const log = (...args) => { try { console.log(`[${SCRIPT_ID}]`, ...args); } catch (_) {} };
-  const dbg = (...args) => { if (DEBUG) log(...args); };
-
   /* ------------------------------------------------------------------
      Pattern helpers (legacy/internal approach)
   ------------------------------------------------------------------ */
@@ -289,6 +369,7 @@
     const raw = gmGet('config', null);
     const cfg = mergeDeep(JSON.parse(JSON.stringify(DEFAULTS)), (raw && typeof raw === 'object') ? raw : {});
     DEBUG = !!cfg.debug;
+    log.setDebug(DEBUG);
     return cfg;
   };
 
@@ -297,6 +378,7 @@
     const next = mergeDeep(cfg, patch || {});
     gmSet('config', next);
     DEBUG = !!next.debug;
+    log.setDebug(DEBUG);
     return next;
   };
 
@@ -1387,6 +1469,6 @@
   try {
     main();
   } catch (err) {
-    console.error(LOG_PREFIX, 'fatal error', err);
+    log('error', 'fatal error', err);
   }
 })();

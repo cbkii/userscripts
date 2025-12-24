@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ad Interaction Gate Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.01.31.1200
+// @version      2025.12.24.0055
 // @description  Unlocks ad interaction gates after repeated clicks with optional auto-actions.
 // @author       cbkii
 // @match        *://*/*
@@ -41,7 +41,93 @@
     'use strict';
 
     const DEBUG = false;
-    const LOG_PREFIX = '[ad-interaction]';
+    const LOG_PREFIX = '[adint]';
+    const LOG_STORAGE_KEY = 'userscript.logs.adinteract';
+    const LOG_MAX_ENTRIES = 200;
+    const logConfig = { debugMode: false, logLevel: 'info' };
+
+    const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
+        let debugEnabled = !!debug;
+        const SENSITIVE_KEY_RE = /pass(word)?|token|secret|auth|session|cookie|key/i;
+        const scrubString = (value) => {
+            if (typeof value !== 'string') return '';
+            let text = value.replace(
+                /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
+                '$1$2=[redacted]'
+            );
+            if (/^https?:\\/\\//i.test(text)) {
+                try {
+                    const url = new URL(text);
+                    text = `${url.origin}${url.pathname}`;
+                } catch (_) {}
+            }
+            return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+        };
+        const describeElement = (value) => {
+            if (!value || !value.tagName) return 'element';
+            const id = value.id ? `#${value.id}` : '';
+            const classes = value.classList && value.classList.length
+                ? `.${Array.from(value.classList).slice(0, 2).join('.')}`
+                : '';
+            return `${value.tagName.toLowerCase()}${id}${classes}`;
+        };
+        const scrubValue = (value, depth = 0) => {
+            if (value == null) return value;
+            if (typeof value === 'string') return scrubString(value);
+            if (value instanceof Error) {
+                return { name: value.name, message: scrubString(value.message) };
+            }
+            if (typeof Element !== 'undefined' && value instanceof Element) {
+                return describeElement(value);
+            }
+            if (typeof value === 'object') {
+                if (depth >= 1) return '[truncated]';
+                if (Array.isArray(value)) {
+                    return value.slice(0, 4).map((item) => scrubValue(item, depth + 1));
+                }
+                const out = {};
+                Object.keys(value).slice(0, 4).forEach((key) => {
+                    out[key] = SENSITIVE_KEY_RE.test(key)
+                        ? '[redacted]'
+                        : scrubValue(value[key], depth + 1);
+                });
+                return out;
+            }
+            return value;
+        };
+        const writeEntry = async (level, message, meta) => {
+            try {
+                const existing = await Promise.resolve(GM_getValue(storageKey, []));
+                const list = Array.isArray(existing) ? existing : [];
+                list.push({ ts: new Date().toISOString(), level, message, meta });
+                if (list.length > maxEntries) {
+                    list.splice(0, list.length - maxEntries);
+                }
+                await Promise.resolve(GM_setValue(storageKey, list));
+            } catch (_) {}
+        };
+        const log = (level, message, meta) => {
+            if (level === 'debug' && !debugEnabled) return;
+            const msg = typeof message === 'string' ? scrubString(message) : 'event';
+            const data = typeof message === 'string' ? meta : message;
+            const sanitized = data === undefined ? undefined : scrubValue(data);
+            writeEntry(level, msg, sanitized).catch(() => {});
+            if (debugEnabled || level === 'warn' || level === 'error') {
+                const method = level === 'debug' ? 'log' : level;
+                const payload = sanitized === undefined ? [] : [sanitized];
+                console[method](prefix, msg, ...payload);
+            }
+        };
+        log.setDebug = (value) => { debugEnabled = !!value; };
+        return log;
+    };
+
+    const log = createLogger({
+        prefix: LOG_PREFIX,
+        storageKey: LOG_STORAGE_KEY,
+        maxEntries: LOG_MAX_ENTRIES,
+        debug: DEBUG
+    });
 
     function main() {
 
@@ -93,11 +179,9 @@
     };
 
     // Utility functions
-    const log = (level, ...args) => {
-        if (DEBUG || config.debugMode || config.logLevel === 'debug') {
-            console[level === 'debug' ? 'log' : level](`${LOG_PREFIX}`, ...args);
-        }
-    };
+    logConfig.debugMode = !!config.debugMode;
+    logConfig.logLevel = config.logLevel || 'info';
+    log.setDebug(DEBUG || logConfig.debugMode || logConfig.logLevel === 'debug');
     const showToast = (msg) => {
         const toast = document.createElement('div');
         toast.style.cssText = 'position:fixed;top:20px;right:20px;z-index:2147483647;background:rgba(0,150,0,0.9);color:#fff;padding:8px 12px;border-radius:4px;font:12px Arial;pointer-events:none;opacity:1;transition:opacity 0.5s;';
@@ -156,7 +240,7 @@
 
     // Spoof interaction
     const spoofInteraction = (el) => {
-        log('info', 'Spoofing:', el);
+        log('info', 'Spoofing element', el);
         // Simulate click
         try {
             const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
@@ -316,7 +400,7 @@
                 const text = await fetchUrl(source.url);
                 parseAbpDomains(text).forEach((domain) => domains.add(domain));
             } catch (err) {
-                log('warn', 'Failed to fetch exclusion source:', source.url, err);
+                log('warn', 'Exclusion fetch failed', { url: source.url, error: err });
             }
         }
         if (domains.size) {
@@ -365,7 +449,7 @@
             if (!autoActionsEnabled) {
                 autoActionsEnabled = true;
                 runGatedAutoActions();
-                log('info', 'Gated auto-actions enabled.');
+                log('info', 'Auto-actions enabled');
             }
             // Spoof clicked element and nearby
             spoofInteraction(el);
@@ -381,7 +465,7 @@
         const origAdd = EventTarget.prototype.addEventListener;
         EventTarget.prototype.addEventListener = function(type, listener, options) {
             if (type === 'click' && fuzzySelectors.some(sel => this.matches(sel))) {
-                log('debug', 'Patched click listener on:', this);
+                log('debug', 'Patched click listener', this);
             }
             return origAdd.call(this, type, listener, options);
         };
@@ -389,24 +473,24 @@
 
     // Initialize
     const init = () => {
-        log('info', 'Initializing Proximity + Multi-Trigger + Gated Auto Bypass...');
+        log('info', 'Init');
         injectCSS();
         patchEvents();
         document.addEventListener('click', handleManualClick, true);
-        log('info', 'Ready. Click elements 3+ times (multiple triggers allowed) to unlock and enable gated auto-actions.');
+        log('info', 'Ready: click 3+ times to unlock');
     };
 
     const bootstrap = async () => {
         const cached = loadCachedExclusions();
         if (cached.size && isExcludedHost(cached)) {
-            log('info', 'Skipped on excluded host:', HOST);
+            log('info', 'Excluded host', HOST);
             return;
         }
 
         if (shouldRefreshExclusions()) {
             const fresh = await refreshExclusions();
             if (fresh.size && isExcludedHost(fresh)) {
-                log('info', 'Excluded host detected after refresh:', HOST);
+                log('info', 'Excluded host after refresh', HOST);
                 return;
             }
         }
@@ -414,7 +498,7 @@
         init();
     };
 bootstrap().catch((err) => {
-    log('warn', 'Bootstrap failed; continuing without exclusions:', err);
+    log('warn', 'Bootstrap failed; skipping exclusions', err);
     init();
 });
     if (typeof GM_registerMenuCommand === 'function') {
@@ -429,6 +513,6 @@ bootstrap().catch((err) => {
     try {
         main();
     } catch (err) {
-        console.error(LOG_PREFIX, 'fatal error', err);
+        log('error', 'fatal error', err);
     }
 })();

@@ -2,7 +2,7 @@
 // @name         Export Full Page Info (XBrowser)
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
-// @version      2025.12.23.1605
+// @version      2025.12.24.0055
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -19,6 +19,8 @@
 // @grant        GM_openInTab
 // @grant        GM_registerMenuCommand
 // @grant        GM_setClipboard
+// @grant        GM_getValue
+// @grant        GM_setValue
 // ==/UserScript==
 
 /*
@@ -40,7 +42,85 @@
   'use strict';
 
   const DEBUG = false;
-  const LOG_PREFIX = '[pageinfo-export]';
+  const LOG_PREFIX = '[pginfo]';
+  const LOG_STORAGE_KEY = 'userscript.logs.pageinfoexport';
+  const LOG_MAX_ENTRIES = 200;
+
+  const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
+    let debugEnabled = !!debug;
+    const SENSITIVE_KEY_RE = /pass(word)?|token|secret|auth|session|cookie|key/i;
+    const scrubString = (value) => {
+      if (typeof value !== 'string') return '';
+      let text = value.replace(
+        /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
+        '$1$2=[redacted]'
+      );
+      if (/^https?:\\/\\//i.test(text)) {
+        try {
+          const url = new URL(text);
+          text = `${url.origin}${url.pathname}`;
+        } catch (_) {}
+      }
+      return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+    };
+    const describeElement = (value) => {
+      if (!value || !value.tagName) return 'element';
+      const id = value.id ? `#${value.id}` : '';
+      const classes = value.classList && value.classList.length
+        ? `.${Array.from(value.classList).slice(0, 2).join('.')}`
+        : '';
+      return `${value.tagName.toLowerCase()}${id}${classes}`;
+    };
+    const scrubValue = (value, depth = 0) => {
+      if (value == null) return value;
+      if (typeof value === 'string') return scrubString(value);
+      if (value instanceof Error) {
+        return { name: value.name, message: scrubString(value.message) };
+      }
+      if (typeof Element !== 'undefined' && value instanceof Element) {
+        return describeElement(value);
+      }
+      if (typeof value === 'object') {
+        if (depth >= 1) return '[truncated]';
+        if (Array.isArray(value)) {
+          return value.slice(0, 4).map((item) => scrubValue(item, depth + 1));
+        }
+        const out = {};
+        Object.keys(value).slice(0, 4).forEach((key) => {
+          out[key] = SENSITIVE_KEY_RE.test(key)
+            ? '[redacted]'
+            : scrubValue(value[key], depth + 1);
+        });
+        return out;
+      }
+      return value;
+    };
+    const writeEntry = async (level, message, meta) => {
+      try {
+        const existing = await Promise.resolve(GM_getValue(storageKey, []));
+        const list = Array.isArray(existing) ? existing : [];
+        list.push({ ts: new Date().toISOString(), level, message, meta });
+        if (list.length > maxEntries) {
+          list.splice(0, list.length - maxEntries);
+        }
+        await Promise.resolve(GM_setValue(storageKey, list));
+      } catch (_) {}
+    };
+    const log = (level, message, meta) => {
+      if (level === 'debug' && !debugEnabled) return;
+      const msg = typeof message === 'string' ? scrubString(message) : 'event';
+      const data = typeof message === 'string' ? meta : message;
+      const sanitized = data === undefined ? undefined : scrubValue(data);
+      writeEntry(level, msg, sanitized).catch(() => {});
+      if (debugEnabled || level === 'warn' || level === 'error') {
+        const method = level === 'debug' ? 'log' : level;
+        const payload = sanitized === undefined ? [] : [sanitized];
+        console[method](prefix, msg, ...payload);
+      }
+    };
+    log.setDebug = (value) => { debugEnabled = !!value; };
+    return log;
+  };
 
   const DEFAULT_OPTIONS = {
     mode: 'full',
@@ -152,11 +232,12 @@
     };
   })();
 
-  const log = (...args) => {
-    if (DEBUG) {
-      console.log(LOG_PREFIX, ...args);
-    }
-  };
+  const log = createLogger({
+    prefix: LOG_PREFIX,
+    storageKey: LOG_STORAGE_KEY,
+    maxEntries: LOG_MAX_ENTRIES,
+    debug: DEBUG
+  });
 
   const pad = n => (n < 10 ? '0' : '') + n;
   const nowStamp = () => {
@@ -911,6 +992,6 @@
   try {
     main();
   } catch (err) {
-    console.error(LOG_PREFIX, 'fatal error', err);
+    log('error', 'fatal error', err);
   }
 })();

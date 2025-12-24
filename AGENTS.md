@@ -206,6 +206,14 @@ Where feasible:
 - Fail gracefully when selectors don’t match.
 - Log with a consistent prefix; keep `DEBUG` off by default.
 
+### 7.4 Secure logging practices
+- Use a single `createLogger(...)` helper per script to keep logging consistent and minimal.
+- Keep `LOG_PREFIX` concise (short tag in square brackets, e.g., `[pmd]`).
+- Store logs under `GM_setValue('userscript.logs.<short>')` with a capped list size.
+- Redact sensitive data (tokens, auth/session values, passwords, cookies) and strip URL queries/hashes.
+- Avoid logging full DOM nodes, page content, or large payloads; keep logs useful, not exhaustive.
+- Emit console output only for `warn`/`error` or when debug is explicitly enabled.
+
 ---
 
 ## 8) GM4 vs legacy API compatibility (recommended wrapper)
