@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0105
+// @version      2025.12.24.0121
 // @description  Converts a selected page element to Markdown with preview/export.
 // @author       cbkii (fork of shiquda)
 // @match        *://*/*
@@ -229,38 +229,17 @@
 
         $modal.find('.h2m-download').on('click', function () { // Download
             const markdown = $modal.find('textarea').val();
-            const filename = `${document.title}-${new Date().toISOString().replace(/:/g, '-')}.md`;
+            const safeTitle = (document.title || 'page')
+                .replace(/\s+/g, ' ')
+                .replace(/[\\/:*?"<>|]+/g, '')
+                .trim() || 'page';
+            const filename = `${safeTitle}-${new Date().toISOString().replace(/[:.]/g, '-')}.md`;
             const gmDownloadFn = typeof GM_download === 'function'
                 ? GM_download
                 : (typeof GM !== 'undefined' && typeof GM.download === 'function'
                     ? GM.download.bind(GM)
                     : null);
-            const startDownload = (blob) => {
-                const url = URL.createObjectURL(blob);
-                const cleanup = () => {
-                    try {
-                        URL.revokeObjectURL(url);
-                    } catch (_) {
-                        // ignore
-                    }
-                };
-
-                if (gmDownloadFn) {
-                    try {
-                        gmDownloadFn({
-                            url,
-                            name: filename,
-                            saveAs: false,
-                            onload: cleanup,
-                            ontimeout: cleanup,
-                            onerror: cleanup
-                        });
-                        return;
-                    } catch (_) {
-                        cleanup();
-                    }
-                }
-
+            const anchorDownload = (url, cleanup) => {
                 const a = document.createElement('a');
                 a.href = url;
                 a.download = filename;
@@ -269,7 +248,49 @@
                 setTimeout(() => {
                     document.body.removeChild(a);
                     cleanup();
-                }, 0);
+                }, 500);
+            };
+            const startDownload = (blob) => {
+                const url = URL.createObjectURL(blob);
+                const cleanup = (() => {
+                    let cleaned = false;
+                    return () => {
+                        if (cleaned) return;
+                        cleaned = true;
+                        try {
+                            URL.revokeObjectURL(url);
+                        } catch (_) {
+                            // ignore
+                        }
+                    };
+                })();
+                const safetyTimer = setTimeout(cleanup, 15000);
+                const wrappedCleanup = () => {
+                    clearTimeout(safetyTimer);
+                    cleanup();
+                };
+
+                if (gmDownloadFn) {
+                    try {
+                        gmDownloadFn({
+                            url,
+                            name: filename,
+                            saveAs: false,
+                            onload: wrappedCleanup,
+                            ontimeout: wrappedCleanup,
+                            onerror: (err) => {
+                                log('warn', 'GM_download failed, falling back', err);
+                                anchorDownload(url, wrappedCleanup);
+                            }
+                        });
+                        return;
+                    } catch (err) {
+                        log('warn', 'GM_download threw; falling back', err);
+                        // fall through to anchor fallback without revoking early
+                    }
+                }
+
+                anchorDownload(url, wrappedCleanup);
             };
 
             startDownload(new Blob([markdown], { type: 'text/markdown' }));
