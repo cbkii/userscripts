@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii (mobile UI by Claude)
 // @description  Mobile Google search helper with filters, dorks, and a compact UI.
-// @version      2025.12.24.0014
+// @version      2025.12.24.0055
 // @require      https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
 // @require      https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js
 // @match        *://www.google.*/search*
@@ -101,15 +101,15 @@
       }
       return value;
     };
-    const writeEntry = (level, message, meta) => {
+    const writeEntry = async (level, message, meta) => {
       try {
-        const existing = GM_getValue(storageKey, []);
+        const existing = await Promise.resolve(GM_getValue(storageKey, []));
         const list = Array.isArray(existing) ? existing : [];
         list.push({ ts: new Date().toISOString(), level, message, meta });
         if (list.length > maxEntries) {
           list.splice(0, list.length - maxEntries);
         }
-        GM_setValue(storageKey, list);
+        await Promise.resolve(GM_setValue(storageKey, list));
       } catch (_) {}
     };
     const log = (level, message, meta) => {
@@ -117,7 +117,7 @@
       const msg = typeof message === 'string' ? scrubString(message) : 'event';
       const data = typeof message === 'string' ? meta : message;
       const sanitized = data === undefined ? undefined : scrubValue(data);
-      writeEntry(level, msg, sanitized);
+      writeEntry(level, msg, sanitized).catch(() => {});
       if (debugEnabled || level === 'warn' || level === 'error') {
         const method = level === 'debug' ? 'log' : level;
         const payload = sanitized === undefined ? [] : [sanitized];

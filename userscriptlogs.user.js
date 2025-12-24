@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Log Viewer
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0014
+// @version      2025.12.24.0055
 // @description  View and clear stored userscript logs from a simple on-page dialog.
 // @author       cbkii
 // @match        *://*/*
@@ -85,15 +85,15 @@
       }
       return value;
     };
-    const writeEntry = (level, message, meta) => {
+    const writeEntry = async (level, message, meta) => {
       try {
-        const existing = GM_getValue(storageKey, []);
+        const existing = await Promise.resolve(GM_getValue(storageKey, []));
         const list = Array.isArray(existing) ? existing : [];
         list.push({ ts: new Date().toISOString(), level, message, meta });
         if (list.length > maxEntries) {
           list.splice(0, list.length - maxEntries);
         }
-        GM_setValue(storageKey, list);
+        await Promise.resolve(GM_setValue(storageKey, list));
       } catch (_) {}
     };
     const log = (level, message, meta) => {
@@ -101,7 +101,7 @@
       const msg = typeof message === 'string' ? scrubString(message) : 'event';
       const data = typeof message === 'string' ? meta : message;
       const sanitized = data === undefined ? undefined : scrubValue(data);
-      writeEntry(level, msg, sanitized);
+      writeEntry(level, msg, sanitized).catch(() => {});
       if (debugEnabled || level === 'warn' || level === 'error') {
         const method = level === 'debug' ? 'log' : level;
         const payload = sanitized === undefined ? [] : [sanitized];
@@ -120,46 +120,50 @@
   });
 
   function main() {
-    GM_registerMenuCommand('View userscript logs', renderDialog);
-    GM_registerMenuCommand('Clear userscript logs', () => {
-      clearLogs();
+    GM_registerMenuCommand('View userscript logs', () => {
+      renderDialog().catch((err) => log('error', 'render dialog failed', err));
+    });
+    GM_registerMenuCommand('Clear userscript logs', async () => {
+      await clearLogs();
       removeDialog();
       log('debug', 'Logs cleared');
     });
   }
 
-  function getLogKeys() {
+  async function getLogKeys() {
     try {
-      return GM_listValues().filter((key) => key.startsWith(LOG_PREFIX_KEY));
+      const keys = await Promise.resolve(GM_listValues());
+      if (!Array.isArray(keys)) return [];
+      return keys.filter((key) => typeof key === 'string' && key.startsWith(LOG_PREFIX_KEY));
     } catch (_) {
       return [];
     }
   }
 
-  function loadLogs() {
-    const keys = getLogKeys();
+  async function loadLogs() {
+    const keys = await getLogKeys();
     const entries = [];
-    keys.forEach((key) => {
+    for (const key of keys) {
       const script = key.slice(LOG_PREFIX_KEY.length) || 'unknown';
       let list = [];
       try {
-        list = GM_getValue(key, []);
+        list = await Promise.resolve(GM_getValue(key, []));
       } catch (_) {
         list = [];
       }
-      if (!Array.isArray(list)) return;
+      if (!Array.isArray(list)) continue;
       list.forEach((entry) => {
         if (!entry || typeof entry !== 'object') return;
-        const meta = Array.isArray(entry.meta) ? entry.meta : [];
+        const hasMeta = Object.prototype.hasOwnProperty.call(entry, 'meta');
         entries.push({
           script,
           ts: entry.ts || '',
           level: entry.level || 'info',
           message: entry.message || '',
-          meta,
+          meta: hasMeta ? entry.meta : undefined,
         });
       });
-    });
+    }
     entries.sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
     return entries;
   }
@@ -169,9 +173,16 @@
       return 'No stored userscript logs found.';
     }
     return entries.map((entry) => {
-      const meta = Array.isArray(entry.meta) && entry.meta.length
-        ? ` ${JSON.stringify(entry.meta)}`
-        : '';
+      const meta =
+        entry.meta === undefined || entry.meta === null
+          ? ''
+          : (() => {
+            try {
+              return ` ${typeof entry.meta === 'string' ? entry.meta : JSON.stringify(entry.meta)}`;
+            } catch (_) {
+              return ` ${String(entry.meta)}`;
+            }
+          })();
       return `[${entry.ts}] [${entry.level}] [${entry.script}] ${entry.message}${meta}`;
     }).join('\n');
   }
@@ -260,15 +271,16 @@
     }
   }
 
-  function clearLogs() {
-    getLogKeys().forEach((key) => {
+  async function clearLogs() {
+    const keys = await getLogKeys();
+    for (const key of keys) {
       try {
-        GM_deleteValue(key);
+        await Promise.resolve(GM_deleteValue(key));
       } catch (_) {}
-    });
+    }
   }
 
-  function renderDialog() {
+  async function renderDialog() {
     removeDialog();
     ensureStyles();
 
@@ -283,8 +295,13 @@
 
     const body = document.createElement('div');
     body.id = UI_IDS.body;
-    const entries = loadLogs();
-    body.textContent = formatLogs(entries);
+    try {
+      const entries = await loadLogs();
+      body.textContent = formatLogs(entries);
+    } catch (err) {
+      log('error', 'failed to load logs', err);
+      body.textContent = 'Failed to load stored logs. Please try again.';
+    }
 
     const actions = document.createElement('div');
     actions.className = 'userscript-logs-actions';
@@ -295,8 +312,8 @@
 
     const clearBtn = document.createElement('button');
     clearBtn.textContent = 'Clear Logs';
-    clearBtn.addEventListener('click', () => {
-      clearLogs();
+    clearBtn.addEventListener('click', async () => {
+      await clearLogs();
       body.textContent = 'Logs cleared. Refresh the page to view new logs.';
     });
 
