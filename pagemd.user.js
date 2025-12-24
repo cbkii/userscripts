@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0121
+// @version      2025.12.24.0251
 // @description  Converts a selected page element to Markdown with preview/export.
 // @author       cbkii (fork of shiquda)
 // @match        *://*/*
@@ -282,7 +282,11 @@
                                 log('warn', 'GM_download failed, falling back', err);
                                 anchorDownload(url, wrappedCleanup);
                             }
-                        });
+                        })?.then?.(() => wrappedCleanup())
+                          ?.catch?.((err) => {
+                              log('warn', 'GM_download promise rejected, falling back', err);
+                              anchorDownload(url, wrappedCleanup);
+                          });
                         return;
                     } catch (err) {
                         log('warn', 'GM_download threw; falling back', err);

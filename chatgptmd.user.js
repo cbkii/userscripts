@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0121
+// @version      2025.12.24.0251
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions.
 // @author       cbcoz
 // @match        *://chat.openai.com/*
@@ -939,7 +939,7 @@
     return text.trim();
   }
 
-  async function mobileDownload(content, filename, mimeType = 'text/plain') {
+  function mobileDownload(content, filename, mimeType = 'text/plain') {
     const gmDownloadFn = typeof GM_download === 'function'
       ? GM_download
       : (typeof GM !== 'undefined' && typeof GM.download === 'function'
@@ -977,38 +977,41 @@
       blobUrl = '';
     };
 
-    const safetyTimer = setTimeout(revokeBlobUrl, 15000);
-    const wrappedCleanup = () => {
-      clearTimeout(safetyTimer);
-      revokeBlobUrl();
-    };
-
     const createBlob = () => new Blob([content], { type: `${mimeType};charset=utf-8` });
+    const startSafetyTimer = (cleanup) => setTimeout(cleanup, 15000);
 
-    const fallbackToDataUrl = () => new Promise((resolve) => {
+    const fallbackToDataUrl = () => {
       try {
         const reader = new FileReader();
         reader.onload = () => {
-          const dataUrl = reader.result;
           try {
-            anchorDownload(dataUrl, () => {});
-            resolve(true);
+            anchorDownload(reader.result, () => {});
           } catch (err) {
             log('error', 'Data URL download failed', err);
-            resolve(false);
+            alert('❗ Download failed. Try copying manually.');
           }
         };
-        reader.onerror = () => resolve(false);
+        reader.onerror = () => {
+          alert('❗ Download failed. Try copying manually.');
+        };
         reader.readAsDataURL(createBlob());
+        return true;
       } catch (err) {
         log('error', 'FileReader data URL fallback failed', err);
-        resolve(false);
+        alert('❗ Download failed. Try copying manually.');
+        return false;
       }
-    });
+    };
 
     if (gmDownloadFn) {
       try {
         blobUrl = URL.createObjectURL(createBlob());
+        const cleanup = () => revokeBlobUrl();
+        const safetyTimer = startSafetyTimer(cleanup);
+        const wrappedCleanup = () => {
+          clearTimeout(safetyTimer);
+          cleanup();
+        };
         gmDownloadFn({
           url: blobUrl,
           name: filename,
@@ -1019,6 +1022,11 @@
             log('warn', 'GM_download failed; falling back', err);
             anchorDownload(blobUrl, wrappedCleanup);
           }
+        })
+        ?.then?.(() => wrappedCleanup())
+        ?.catch?.((err) => {
+          log('warn', 'GM_download promise rejected; falling back', err);
+          anchorDownload(blobUrl, wrappedCleanup);
         });
         return true;
       } catch (gmErr) {
@@ -1028,15 +1036,18 @@
 
     try {
       blobUrl = URL.createObjectURL(createBlob());
+      const cleanup = () => revokeBlobUrl();
+      const safetyTimer = startSafetyTimer(cleanup);
+      const wrappedCleanup = () => {
+        clearTimeout(safetyTimer);
+        cleanup();
+      };
       anchorDownload(blobUrl, wrappedCleanup);
       return true;
     } catch (error) {
-      wrappedCleanup();
-      const ok = await fallbackToDataUrl();
-      if (!ok) {
-        log('error', 'Download failed', error);
-        alert('❗ Download failed. Try copying manually.');
-      }
+      revokeBlobUrl();
+      const ok = fallbackToDataUrl();
+      if (!ok) log('error', 'Download failed', error);
       return ok;
     }
   }
