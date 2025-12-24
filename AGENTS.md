@@ -28,6 +28,12 @@ A change is complete only when all items below are true:
 - `scripts/<short-name>.user.js` — one userscript per file
 - `docs/<short-name>.md` — optional per-script usage and test notes
 
+### Repo-wide patterns (apply unless overridden)
+- Persist enable/disable state per script with `GM_getValue`/`GM_setValue` using key `${id}.enabled`, expose a menu toggle (`GM_registerMenuCommand` + optional unregister).
+- Register with the shared UI manager (`userscriptui.user.js`) when available, but ensure the script still runs with its own UI and commands if the shared UI is missing.
+- Use the logging helper pattern that scrubs sensitive values and stores capped entries under `userscript.logs.<short>`.
+- Keep UI idempotent and teardown-safe: disconnect observers, remove injected DOM, and clear timers on disable.
+
 ### Dependencies and updates (single-file only)
 - **Single-file only**: each userscript must be fully self-contained; do not add a `lib/` folder or any shared local JS files.
 - External dependencies must come from **trustworthy, stable CDNs** (e.g., official vendor CDNs, Google Hosted Libraries, cdnjs).
@@ -289,58 +295,7 @@ When targeting XBrowser:
 
 ## 12) Canonical script template (copy/paste)
 
-~~~js
-// ==UserScript==
-// @name         <Script Name>
-// @namespace    https://example.com/userscripts
-// @version      0.1.0
-// @description  <Concise English summary of purpose and key features>
-// @author       <You>
-// @match        https://example.com/*
-// @run-at       document-idle
-// @noframes
-// @grant        GM_addStyle
-// @grant        GM_getValue
-// @grant        GM_setValue
-// ==/UserScript==
-
-/*
-  Feature summary:
-  - <Bullet list of key capabilities>
-
-  How it works:
-  - <High-level flow in 1-3 bullets>
-
-  Configuration:
-  - <What users can change and where>
-*/
-
-(() => {
-  'use strict';
-
-  const DEBUG = false;
-  const LOG_PREFIX = '[<short-name>]';
-
-  const log = (...args) => { if (DEBUG) console.log(LOG_PREFIX, ...args); };
-
-  function safeAddStyle(css) {
-    try { GM_addStyle(css); } catch (_) { /* no-op */ }
-  }
-
-  function main() {
-    // 1) validate page state / URL
-    // 2) apply idempotent DOM changes
-    // 3) attach minimal observers/listeners
-    log('started');
-  }
-
-  try {
-    main();
-  } catch (err) {
-    console.error(LOG_PREFIX, 'fatal error', err);
-  }
-})();
-~~~
+You **must** follow **[AGENTS-boilerplate.md](./AGENTS-boilerplate.md)** for the required metadata, scaffold, formatting, and shared UI/logging integration template applied across all scripts. Deviations require explicit justification in review notes.
 
 ---
 
@@ -371,6 +326,7 @@ When asked to build or update a script:
 ## 14) References (for agents)
 
 - **[API-doc.md](./API-doc.md)** (required reading; authoritative API guidance for all scripts)
+- **[AGENTS-boilerplate.md](./AGENTS-boilerplate.md)** (scaffold, formatting, and shared UI/logging integration rules)
 - Tampermonkey documentation (metadata, grants, APIs, sandbox, updates)
 - Tampermonkey changelog (behaviour changes, MV3 notes)
 - Chrome match patterns documentation (for `@match` semantics)

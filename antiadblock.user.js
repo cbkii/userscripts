@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0055
+// @version      2025.12.24.1700
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @match        *://*/*
@@ -22,10 +22,12 @@
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // @connect      easylist-downloads.adblockplus.org
 // @connect      raw.githubusercontent.com
+// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // ==/UserScript==
 
 /*
@@ -50,6 +52,29 @@
   const LOG_STORAGE_KEY = 'userscript.logs.antiadblock';
   const LOG_MAX_ENTRIES = 200;
   let DEBUG = false;
+  const SCRIPT_ID = 'antiadblock';
+  const SCRIPT_TITLE = 'Anti-AdBlock Neutralizer';
+  const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+  const gmStore = {
+    async get(key, fallback) {
+      try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
+    },
+    async set(key, value) {
+      try { await GM_setValue(key, value); } catch (_) {}
+    }
+  };
+  const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
+    ? window.__userscriptSharedUi.getInstance({
+      get: (key, fallback) => gmStore.get(key, fallback),
+      set: (key, value) => gmStore.set(key, value)
+    })
+    : null;
+  const state = {
+    enabled: true,
+    started: false,
+    menuIds: []
+  };
+  const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
   const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
     let debugEnabled = !!debug;
@@ -1466,9 +1491,91 @@
 
   }
 
-  try {
+  const renderPanel = () => {
+    const wrapper = document.createElement('div');
+    wrapper.style.display = 'flex';
+    wrapper.style.flexDirection = 'column';
+    wrapper.style.gap = '10px';
+
+    const info = document.createElement('p');
+    info.textContent = 'Neutralises anti-adblock overlays using cached lists and profiles. Disabling mid-session may leave existing page changes until reload.';
+    info.style.margin = '0';
+    info.style.fontSize = '13px';
+    wrapper.appendChild(info);
+
+    const runBtn = document.createElement('button');
+    runBtn.type = 'button';
+    runBtn.textContent = 'Run fixes now';
+    runBtn.style.padding = '8px 10px';
+    runBtn.style.borderRadius = '8px';
+    runBtn.style.border = '1px solid rgba(255,255,255,0.18)';
+    runBtn.style.background = '#1f2937';
+    runBtn.style.color = '#f8fafc';
+    runBtn.addEventListener('click', () => {
+      if (state.enabled) start();
+    });
+    wrapper.appendChild(runBtn);
+
+    return wrapper;
+  };
+
+  const registerMenu = () => {
+    if (typeof GM_registerMenuCommand !== 'function') return;
+    if (hasUnregister && state.menuIds.length) {
+      state.menuIds.forEach((id) => {
+        try { GM_unregisterMenuCommand(id); } catch (_) {}
+      });
+      state.menuIds = [];
+    }
+    if (!hasUnregister && state.menuIds.length) return;
+    state.menuIds.push(GM_registerMenuCommand(
+      `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+      async () => { await setEnabled(!state.enabled); }
+    ));
+    if (state.enabled) {
+      state.menuIds.push(GM_registerMenuCommand('Run anti-adblock fixes', () => start()));
+    }
+  };
+
+  const stop = async () => {
+    state.started = false;
+  };
+
+  const start = async () => {
+    if (state.started) return;
+    state.started = true;
     main();
-  } catch (err) {
+  };
+
+  const setEnabled = async (value) => {
+    state.enabled = !!value;
+    await gmStore.set(ENABLE_KEY, state.enabled);
+    if (sharedUi) {
+      sharedUi.setScriptEnabled(SCRIPT_ID, state.enabled);
+    }
+    if (!state.enabled) {
+      await stop();
+    } else if (!state.started) {
+      await start();
+    }
+    registerMenu();
+  };
+
+  const init = async () => {
+    state.enabled = await gmStore.get(ENABLE_KEY, true);
+    if (sharedUi) {
+      sharedUi.registerScript({
+        id: SCRIPT_ID,
+        title: SCRIPT_TITLE,
+        enabled: state.enabled,
+        render: renderPanel,
+        onToggle: (next) => setEnabled(next)
+      });
+    }
+    await setEnabled(state.enabled);
+  };
+
+  init().catch((err) => {
     log('error', 'fatal error', err);
-  }
+  });
 })();

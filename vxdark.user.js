@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Router Contrast Dark Mode
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0055
+// @version      2025.12.24.1700
 // @description  High-contrast dark mode for the VX230V router UI.
 // @match        http://192.168.1.1/*
 // @match        https://192.168.1.1/*
@@ -14,6 +14,9 @@
 // @grant        GM_addStyle
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
+// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // ==/UserScript==
 
 /*
@@ -35,6 +38,32 @@
   const LOG_PREFIX = '[vxdark]';
   const LOG_STORAGE_KEY = 'userscript.logs.vxdark';
   const LOG_MAX_ENTRIES = 200;
+  const SCRIPT_ID = 'vxdark';
+  const SCRIPT_TITLE = 'VX Router Dark Mode';
+  const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+  const gmStore = {
+    async get(key, fallback) {
+      try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
+    },
+    async set(key, value) {
+      try { await GM_setValue(key, value); } catch (_) {}
+    }
+  };
+  const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
+    ? window.__userscriptSharedUi.getInstance({
+      get: (key, fallback) => gmStore.get(key, fallback),
+      set: (key, value) => gmStore.set(key, value)
+    })
+    : null;
+  const state = {
+    enabled: true,
+    started: false,
+    menuIds: [],
+    observers: [],
+    styleNode: null,
+    unloadHandler: null
+  };
+  const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
   const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
     let debugEnabled = !!debug;
@@ -119,10 +148,10 @@
     debug: DEBUG
   });
 
-  function main() {
+  async function main() {
+    state.enabled = await gmStore.get(ENABLE_KEY, true);
 
-  /************ Global CSS Styles ************/
-  GM_addStyle(`
+    const DARK_CSS = `
     html, body, top {
       background-color: #121212 !important;
       color: #ffffff !important;
@@ -200,69 +229,179 @@
     ::-webkit-scrollbar-track { background: #1e1e1e; }
     ::-webkit-scrollbar-thumb { background: #555; }
     ::-webkit-scrollbar-thumb:hover { background: #777; }
-  `);
+    `;
 
-  /************ DOM Override: map-icon text colour ************/
-  const observers = [];
-
-  function forceMapIconColor(node) {
-    if (!node || node.nodeType !== 1) return;
-    if (node.matches && node.matches('.map-icon, .map-icon-num')) {
-      node.style.setProperty('color', '#000000', 'important');
-    }
-  }
-
-  // Initial scan for existing elements
-  document.querySelectorAll('.map-icon, .map-icon-num').forEach(forceMapIconColor);
-
-  // Watch for dynamic updates
-  const mo = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      if (m.type === 'childList') {
-        m.addedNodes.forEach((n) => {
-          if (n.nodeType === 1) {
-            if (n.matches?.('.map-icon, span.map-icon-num, .map-icon-num')) forceMapIconColor(n);
-            n.querySelectorAll?.('.map-icon, .map-icon-num').forEach(forceMapIconColor);
-          }
-        });
-      } else if (m.type === 'attributes') {
-        if (m.target.matches?.('.map-icon, span.map-icon-num, .map-icon-num')) forceMapIconColor(m.target);
+    const applyStyles = () => {
+      try {
+        const node = GM_addStyle(DARK_CSS);
+        if (node) state.styleNode = node;
+      } catch (_) {
+        const style = document.createElement('style');
+        style.textContent = DARK_CSS;
+        (document.head || document.documentElement).appendChild(style);
+        state.styleNode = style;
       }
-    }
-  });
-
-  mo.observe(document.documentElement, {
-    subtree: true,
-    childList: true,
-    attributes: true,
-    attributeFilter: ['class', 'style']
-  });
-  observers.push(mo);
-
-  /************ Keep #main background override ************/
-  const main = document.getElementById('main');
-  if (main) {
-    const applyMainStyle = () => {
-      main.style.backgroundColor = '#1a1a1a';
-      main.style.backgroundImage = 'none';
     };
-    applyMainStyle();
-    const mainObserver = new MutationObserver(applyMainStyle);
-    mainObserver.observe(main, { attributes: true, childList: true, subtree: false });
-    observers.push(mainObserver);
+
+    const removeStyles = () => {
+      if (state.styleNode && state.styleNode.parentNode) {
+        try { state.styleNode.parentNode.removeChild(state.styleNode); } catch (_) {}
+      }
+      state.styleNode = null;
+    };
+
+    const disconnectObservers = () => {
+      state.observers.forEach((observer) => {
+        try { observer.disconnect(); } catch (_) {}
+      });
+      state.observers.length = 0;
+    };
+
+    const startObservers = () => {
+      const forceMapIconColor = (node) => {
+        if (!node || node.nodeType !== 1) return;
+        if (node.matches && node.matches('.map-icon, .map-icon-num')) {
+          node.style.setProperty('color', '#000000', 'important');
+        }
+      };
+
+      document.querySelectorAll('.map-icon, .map-icon-num').forEach(forceMapIconColor);
+
+      const mo = new MutationObserver((mutations) => {
+        if (!state.enabled) return;
+        for (const m of mutations) {
+          if (m.type === 'childList') {
+            m.addedNodes.forEach((n) => {
+              if (n.nodeType === 1) {
+                if (n.matches?.('.map-icon, span.map-icon-num, .map-icon-num')) forceMapIconColor(n);
+                n.querySelectorAll?.('.map-icon, .map-icon-num').forEach(forceMapIconColor);
+              }
+            });
+          } else if (m.type === 'attributes') {
+            if (m.target.matches?.('.map-icon, span.map-icon-num, .map-icon-num')) forceMapIconColor(m.target);
+          }
+        }
+      });
+
+      mo.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['class', 'style']
+      });
+      state.observers.push(mo);
+
+      const main = document.getElementById('main');
+      if (main) {
+        const applyMainStyle = () => {
+          main.style.backgroundColor = '#1a1a1a';
+          main.style.backgroundImage = 'none';
+        };
+        applyMainStyle();
+        const mainObserver = new MutationObserver(applyMainStyle);
+        mainObserver.observe(main, { attributes: true, childList: true, subtree: false });
+        state.observers.push(mainObserver);
+      }
+    };
+
+    const detachUnload = () => {
+      if (state.unloadHandler) {
+        window.removeEventListener('beforeunload', state.unloadHandler);
+        state.unloadHandler = null;
+      }
+    };
+
+    const attachUnload = () => {
+      if (state.unloadHandler) return;
+      state.unloadHandler = () => disconnectObservers();
+      window.addEventListener('beforeunload', state.unloadHandler);
+    };
+
+    const stop = async () => {
+      if (!state.started) return;
+      state.started = false;
+      disconnectObservers();
+      detachUnload();
+      removeStyles();
+    };
+
+    const start = async () => {
+      if (state.started) return;
+      state.started = true;
+      applyStyles();
+      startObservers();
+      attachUnload();
+      log('info', 'Dark mode applied');
+    };
+
+    const registerMenu = () => {
+      if (typeof GM_registerMenuCommand !== 'function') return;
+      if (hasUnregister && state.menuIds.length) {
+        state.menuIds.forEach((id) => {
+          try { GM_unregisterMenuCommand(id); } catch (_) {}
+        });
+        state.menuIds = [];
+      }
+      if (!hasUnregister && state.menuIds.length) return;
+      state.menuIds.push(GM_registerMenuCommand(
+        `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+        async () => { await setEnabled(!state.enabled); }
+      ));
+    };
+
+    const setEnabled = async (value) => {
+      state.enabled = !!value;
+      await gmStore.set(ENABLE_KEY, state.enabled);
+      if (sharedUi) {
+        sharedUi.setScriptEnabled(SCRIPT_ID, state.enabled);
+      }
+      if (!state.enabled) {
+        await stop();
+      } else {
+        await start();
+      }
+      registerMenu();
+    };
+
+    const renderPanel = () => {
+      const wrapper = document.createElement('div');
+      wrapper.style.display = 'flex';
+      wrapper.style.flexDirection = 'column';
+      wrapper.style.gap = '8px';
+
+      const status = document.createElement('div');
+      status.textContent = state.enabled ? 'Dark mode is active.' : 'Dark mode is disabled.';
+      status.style.fontSize = '13px';
+      wrapper.appendChild(status);
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.textContent = state.enabled ? 'Disable' : 'Enable';
+      toggleBtn.style.padding = '8px 10px';
+      toggleBtn.style.borderRadius = '8px';
+      toggleBtn.style.border = '1px solid rgba(255,255,255,0.18)';
+      toggleBtn.style.background = '#1f2937';
+      toggleBtn.style.color = '#f8fafc';
+      toggleBtn.addEventListener('click', () => setEnabled(!state.enabled));
+      wrapper.appendChild(toggleBtn);
+
+      return wrapper;
+    };
+
+    if (sharedUi) {
+      sharedUi.registerScript({
+        id: SCRIPT_ID,
+        title: SCRIPT_TITLE,
+        enabled: state.enabled,
+        render: renderPanel,
+        onToggle: (next) => setEnabled(next)
+      });
+    }
+
+    await setEnabled(state.enabled);
   }
 
-  window.addEventListener('beforeunload', () => {
-    observers.forEach((observer) => {
-      try { observer.disconnect(); } catch (_) {}
-    });
-  });
-
-  }
-
-  try {
-    main();
-  } catch (err) {
+  main().catch((err) => {
     log('error', 'fatal error', err);
-  }
+  });
 })();

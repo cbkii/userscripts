@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0055
+// @version      2025.12.24.1700
 // @description  Accelerates download countdown timers and enables download controls.
 // @author       cbkii
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:up|down|load|dl|mirror|drain|transfer)[a-z0-9-]*|[a-z0-9-]*(?:up|down|load|dl|mirror|drain|transfer))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
@@ -16,6 +16,7 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        unsafeWindow
+// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
@@ -42,6 +43,32 @@
     const LOG_PREFIX = '[dlcnt]';
     const LOG_STORAGE_KEY = 'userscript.logs.dlcountdown';
     const LOG_MAX_ENTRIES = 200;
+    const SCRIPT_ID = 'dlcountdown';
+    const SCRIPT_TITLE = 'Download Timer Accelerator';
+    const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+    const gmStore = {
+        async get(key, fallback) {
+            try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
+        },
+        async set(key, value) {
+            try { await GM_setValue(key, value); } catch (_) {}
+        }
+    };
+    const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
+        ? window.__userscriptSharedUi.getInstance({
+            get: (key, fallback) => gmStore.get(key, fallback),
+            set: (key, value) => gmStore.set(key, value)
+        })
+        : null;
+    const state = {
+        enabled: true,
+        started: false,
+        menuIds: [],
+        observer: null,
+        rescanInterval: null,
+        keyboardHandler: null
+    };
+    const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
     const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
         let debugEnabled = !!debug;
@@ -126,18 +153,14 @@
         debug: DEBUG
     });
 
-    function main() {
+    async function main() {
 
     // Configuration
     const ACCELERATION_FACTOR = 100;  // 100x speed (1000ms becomes 10ms)
     const MIN_INTERVAL_MS = 10;       // Minimum interval to prevent browser throttling
     const MAX_INTERVAL_MS = 1000;     // Maximum interval we'll consider a timer
-    const STORAGE_KEY = 'download_timer_accelerator_enabled';
-
-    
-    // State management
-    let isEnabled = GM_getValue(STORAGE_KEY, false);
-    let menuCommandId = null;
+    const STORAGE_KEY = ENABLE_KEY;
+    state.enabled = await gmStore.get(STORAGE_KEY, false);
     
     // Function tracking for restoration
     const originalFunctions = new Map();
@@ -158,7 +181,7 @@
         
         // Get accelerated delay while preserving timer behavior
         getAcceleratedDelay(originalDelay) {
-            if (!isEnabled || !this.isTimerDelay(originalDelay)) {
+            if (!state.enabled || !this.isTimerDelay(originalDelay)) {
                 return originalDelay;
             }
             
@@ -188,7 +211,7 @@
         
         // DOM element manipulation for timer displays
         findAndAccelerateTimerElements() {
-            if (!isEnabled) return;
+            if (!state.enabled) return;
             
             // Common timer element selectors
             const timerSelectors = [
@@ -228,10 +251,12 @@
                         
                         if (seconds <= 0) {
                             clearInterval(acceleratedInterval);
+                            activeIntervals.delete(acceleratedInterval);
                             // Trigger any completion events
                             this.triggerTimerCompletion(element);
                         }
                     }, Math.max(10, Math.floor(1000 / ACCELERATION_FACTOR)));
+                    activeIntervals.set(acceleratedInterval, { internal: true });
                 }
             }
         },
@@ -293,7 +318,7 @@
             
             win.setTimeout = function(callback, delay, ...args) {
                 // Only accelerate if it looks like a timer and we're enabled
-                if (isEnabled && utils.isTimerDelay(delay) && utils.isCountdownCallback(callback)) {
+                if (state.enabled && utils.isTimerDelay(delay) && utils.isCountdownCallback(callback)) {
                     delay = utils.getAcceleratedDelay(delay);
                 }
                 
@@ -327,7 +352,7 @@
                 const originalDelay = delay;
                 
                 // Accelerate countdown intervals
-                if (isEnabled && utils.isTimerDelay(delay) && utils.isCountdownCallback(callback)) {
+                if (state.enabled && utils.isTimerDelay(delay) && utils.isCountdownCallback(callback)) {
                     delay = utils.getAcceleratedDelay(delay);
                 }
                 
@@ -382,7 +407,7 @@
         
         // Advanced: Search for global timer variables and manipulate them
         accelerateGlobalTimers() {
-            if (!isEnabled) return;
+            if (!state.enabled) return;
             
             try {
                 // Common global timer variable names
@@ -404,7 +429,7 @@
         
         // Search for obfuscated timer functions
         findObfuscatedTimers() {
-            if (!isEnabled) return;
+            if (!state.enabled) return;
             
             try {
                 // Look for functions that might be timers
@@ -434,7 +459,7 @@
         
         // Handle common download site patterns
         handleCommonPatterns() {
-            if (!isEnabled) return;
+            if (!state.enabled) return;
             
             try {
                 // Pattern 1: Direct DOM manipulation for common sites
@@ -486,8 +511,12 @@
         // Monitor DOM for new timers
         observeTimerElements() {
             try {
+                if (state.observer) {
+                    try { state.observer.disconnect(); } catch (_) {}
+                    state.observer = null;
+                }
                 const observer = new MutationObserver((mutations) => {
-                    if (!isEnabled) return;
+                    if (!state.enabled) return;
                     
                     mutations.forEach((mutation) => {
                         if (mutation.type === 'childList') {
@@ -518,23 +547,18 @@
                 });
                 
                 // Start observing when DOM is available
+                const startObserving = () => observer.observe(doc.body, { 
+                    childList: true, 
+                    subtree: true,
+                    attributes: false,
+                    characterData: false 
+                });
                 if (doc.body) {
-                    observer.observe(doc.body, { 
-                        childList: true, 
-                        subtree: true,
-                        attributes: false,
-                        characterData: false 
-                    });
+                    startObserving();
                 } else {
-                    doc.addEventListener('DOMContentLoaded', () => {
-                        observer.observe(doc.body, { 
-                            childList: true, 
-                            subtree: true,
-                            attributes: false,
-                            characterData: false 
-                        });
-                    });
+                    doc.addEventListener('DOMContentLoaded', startObserving, { once: true });
                 }
+                state.observer = observer;
             } catch (e) {
                 // Ignore observer setup errors
             }
@@ -570,12 +594,16 @@
     };
     
     // UI and control functions
+    const removeNotifications = () => {
+        try {
+            const existingNotifications = doc.querySelectorAll('.timer-accelerator-notification');
+            existingNotifications.forEach((n) => n.remove());
+        } catch (_) {}
+    };
+
     function showNotification(message, type = 'info') {
         try {
-            // Remove any existing notifications
-            const existingNotifications = doc.querySelectorAll('.timer-accelerator-notification');
-            existingNotifications.forEach(n => n.remove());
-            
+            removeNotifications();
             const notification = doc.createElement('div');
             notification.className = 'timer-accelerator-notification';
             notification.style.cssText = `
@@ -595,8 +623,6 @@
                 max-width: 300px;
                 word-wrap: break-word;
             `;
-            
-            // Add animation styles if not already present
             if (!doc.getElementById('timer-accelerator-styles')) {
                 const styleSheet = doc.createElement('style');
                 styleSheet.id = 'timer-accelerator-styles';
@@ -612,11 +638,8 @@
                 `;
                 (doc.head || doc.documentElement).appendChild(styleSheet);
             }
-            
             notification.textContent = message;
             (doc.body || doc.documentElement).appendChild(notification);
-            
-            // Auto-remove notification
             setTimeout(() => {
                 if (notification.parentNode) {
                     notification.style.animation = 'slideOutRight 0.3s ease-in';
@@ -625,89 +648,185 @@
                     }, 300);
                 }
             }, 4000);
-            
         } catch (e) {
             log('info', 'State update', message);
         }
     }
-    
-    function toggleAcceleration() {
-        isEnabled = !isEnabled;
-        GM_setValue(STORAGE_KEY, isEnabled);
-        
-        updateMenuCommand();
-        
-        if (isEnabled) {
-            showNotification(`🚀 Download timers accelerated ${ACCELERATION_FACTOR}x!`, 'success');
-            
-            // Re-scan for existing timers
-            setTimeout(() => {
-                utils.findAndAccelerateTimerElements();
-                timerAccelerator.accelerateGlobalTimers();
-                timerAccelerator.handleCommonPatterns();
-            }, 100);
-        } else {
-            showNotification('⏱️ Timer acceleration disabled - normal speed', 'info');
+
+    const restoreOriginalFunctions = () => {
+        originalFunctions.forEach((fn, name) => {
+            try { win[name] = fn; } catch (_) {}
+        });
+        originalFunctions.clear();
+    };
+
+    const stop = async () => {
+        if (!state.started) return;
+        state.started = false;
+        if (state.rescanInterval) {
+            clearInterval(state.rescanInterval);
+            state.rescanInterval = null;
         }
-    }
-    
-    function updateMenuCommand() {
-        if (menuCommandId) {
-            GM_unregisterMenuCommand(menuCommandId);
+        if (state.observer) {
+            try { state.observer.disconnect(); } catch (_) {}
+            state.observer = null;
         }
-        
-        const commandText = isEnabled ? 
-            `🟢 Timer Accelerator (${ACCELERATION_FACTOR}x ON)` : 
-            '🔴 Timer Accelerator (OFF)';
-            
-        menuCommandId = GM_registerMenuCommand(commandText, toggleAcceleration);
-    }
-    
-    // Initialize the script
-    function initialize() {
-        log('info', 'Init');
-        
-        // Initialize core acceleration system
+        if (state.keyboardHandler) {
+            doc.removeEventListener('keydown', state.keyboardHandler);
+            state.keyboardHandler = null;
+        }
+        activeIntervals.forEach((_, id) => {
+            try { clearInterval(id); } catch (_) {}
+        });
+        activeIntervals.clear();
+        activeTimeouts.forEach((_, id) => {
+            try { clearTimeout(id); } catch (_) {}
+        });
+        activeTimeouts.clear();
+        restoreOriginalFunctions();
+        removeNotifications();
+    };
+
+    const start = async () => {
+        if (state.started) return;
+        state.started = true;
         timerAccelerator.initializeAcceleration();
-        
-        // Set up menu command
-        updateMenuCommand();
-        
-        // Keyboard shortcut: Ctrl+Alt+T
-        doc.addEventListener('keydown', (e) => {
+        state.keyboardHandler = (e) => {
             if (e.ctrlKey && e.altKey && e.key === 'T') {
                 e.preventDefault();
-                toggleAcceleration();
+                setEnabled(!state.enabled);
             }
-        });
-        
-        log('info', `Status: ${isEnabled ? 'enabled' : 'disabled'}`);
-        log('info', 'Toggle: Ctrl+Alt+T or userscript menu');
-        
-        // Show status on enabled sites
-        if (isEnabled) {
-            setTimeout(() => {
-                showNotification(`🚀 Download timers running at ${ACCELERATION_FACTOR}x speed`, 'success');
-            }, 1000);
-        }
-        
-        // Periodic re-scan for new timers
-        setInterval(() => {
-            if (isEnabled) {
+        };
+        doc.addEventListener('keydown', state.keyboardHandler);
+        if (state.rescanInterval) clearInterval(state.rescanInterval);
+        state.rescanInterval = setInterval(() => {
+            if (state.enabled) {
                 utils.findAndAccelerateTimerElements();
                 timerAccelerator.accelerateGlobalTimers();
             }
         }, 2000);
+        if (state.enabled) {
+            setTimeout(() => {
+                if (state.enabled) {
+                    showNotification(`🚀 Download timers running at ${ACCELERATION_FACTOR}x speed`, 'success');
+                }
+            }, 1000);
+        }
+        log('info', `Status: ${state.enabled ? 'enabled' : 'disabled'}`);
+        log('info', 'Toggle: Ctrl+Alt+T or userscript menu');
+    };
+
+    const registerMenu = () => {
+        if (typeof GM_registerMenuCommand !== 'function') return;
+        if (hasUnregister && state.menuIds.length) {
+            state.menuIds.forEach((id) => {
+                try { GM_unregisterMenuCommand(id); } catch (_) {}
+            });
+            state.menuIds = [];
+        }
+        if (!hasUnregister && state.menuIds.length) {
+            return;
+        }
+        state.menuIds.push(GM_registerMenuCommand(
+            `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+            async () => { await setEnabled(!state.enabled); }
+        ));
+        if (state.enabled) {
+            state.menuIds.push(GM_registerMenuCommand('Rescan timers', () => {
+                utils.findAndAccelerateTimerElements();
+                timerAccelerator.accelerateGlobalTimers();
+                timerAccelerator.handleCommonPatterns();
+            }));
+        }
+    };
+
+    const setEnabled = async (value) => {
+        state.enabled = !!value;
+        await gmStore.set(STORAGE_KEY, state.enabled);
+        if (sharedUi) {
+            sharedUi.setScriptEnabled(SCRIPT_ID, state.enabled);
+        }
+        if (!state.enabled) {
+            await stop();
+            showNotification('⏱️ Timer acceleration disabled - normal speed', 'info');
+        } else {
+            await start();
+            showNotification(`🚀 Download timers accelerated ${ACCELERATION_FACTOR}x!`, 'success');
+            setTimeout(() => {
+                if (state.enabled) {
+                    utils.findAndAccelerateTimerElements();
+                    timerAccelerator.accelerateGlobalTimers();
+                    timerAccelerator.handleCommonPatterns();
+                }
+            }, 120);
+        }
+        registerMenu();
+    };
+
+    const renderPanel = () => {
+        const wrapper = doc.createElement('div');
+        wrapper.style.display = 'flex';
+        wrapper.style.flexDirection = 'column';
+        wrapper.style.gap = '10px';
+
+        const status = doc.createElement('div');
+        status.textContent = state.enabled
+            ? `Running at ${ACCELERATION_FACTOR}x speed`
+            : 'Disabled (normal timers)';
+        status.style.fontSize = '13px';
+        wrapper.appendChild(status);
+
+        const buttons = doc.createElement('div');
+        buttons.style.display = 'flex';
+        buttons.style.gap = '8px';
+        buttons.style.flexWrap = 'wrap';
+
+        const toggleBtn = doc.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.textContent = state.enabled ? 'Disable' : 'Enable';
+        toggleBtn.style.padding = '8px 10px';
+        toggleBtn.style.borderRadius = '8px';
+        toggleBtn.style.border = '1px solid rgba(255,255,255,0.18)';
+        toggleBtn.style.background = '#1f2937';
+        toggleBtn.style.color = '#f8fafc';
+        toggleBtn.addEventListener('click', () => setEnabled(!state.enabled));
+        buttons.appendChild(toggleBtn);
+
+        const rescanBtn = doc.createElement('button');
+        rescanBtn.type = 'button';
+        rescanBtn.textContent = 'Rescan timers';
+        rescanBtn.style.padding = '8px 10px';
+        rescanBtn.style.borderRadius = '8px';
+        rescanBtn.style.border = '1px solid rgba(255,255,255,0.18)';
+        rescanBtn.style.background = '#1f2937';
+        rescanBtn.style.color = '#f8fafc';
+        rescanBtn.addEventListener('click', () => {
+            utils.findAndAccelerateTimerElements();
+            timerAccelerator.accelerateGlobalTimers();
+            timerAccelerator.handleCommonPatterns();
+        });
+        rescanBtn.disabled = !state.enabled;
+        buttons.appendChild(rescanBtn);
+
+        wrapper.appendChild(buttons);
+        return wrapper;
+    };
+
+    if (sharedUi) {
+        sharedUi.registerScript({
+            id: SCRIPT_ID,
+            title: SCRIPT_TITLE,
+            enabled: state.enabled,
+            render: renderPanel,
+            onToggle: (next) => setEnabled(next)
+        });
     }
-    
-    // Start immediately
-    initialize();
+
+    await setEnabled(state.enabled);
 
     }
 
-    try {
-        main();
-    } catch (err) {
+    main().catch((err) => {
         log('error', 'fatal error', err);
-    }
+    });
 })();
