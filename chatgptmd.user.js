@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0055
+// @version      2025.12.24.0924
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions.
 // @author       cbcoz
 // @match        *://chat.openai.com/*
@@ -15,6 +15,7 @@
 // @grant        GM_setClipboard
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_download
 // ==/UserScript==
 
 /*
@@ -47,6 +48,13 @@
 
   const LOG_STORAGE_KEY = 'userscript.logs.chatgptmd';
   const LOG_MAX_ENTRIES = 200;
+  const gmDownloadLegacy = typeof GM_download === 'function' ? GM_download : null;
+  const gmDownloadAsync = typeof GM !== 'undefined' && GM && typeof GM.download === 'function'
+    ? GM.download.bind(GM)
+    : null;
+  const DOWNLOAD_ANCHOR_DELAY_MS = 500;
+  const BLOB_STALE_MS = 10000;
+  const BLOB_REVOKE_MS = 120000;
 
   const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
     let debugEnabled = !!debug;
@@ -57,7 +65,7 @@
         /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
         '$1$2=[redacted]'
       );
-      if (/^https?:\\/\\//i.test(text)) {
+      if (/^https?:\/\//i.test(text)) {
         try {
           const url = new URL(text);
           text = `${url.origin}${url.pathname}`;
@@ -938,12 +946,90 @@
     return text.trim();
   }
 
-  function mobileDownload(content, filename, mimeType = 'text/plain') {
+  const createDownloadResource = (text, mime) => {
+    const state = {
+      blob: null,
+      url: null,
+      stale: true,
+      revoked: false,
+      staleTimer: null,
+      revokeTimer: null,
+    };
+
+    const scheduleTimers = () => {
+      clearTimeout(state.staleTimer);
+      clearTimeout(state.revokeTimer);
+      state.staleTimer = setTimeout(() => {
+        state.stale = true;
+      }, BLOB_STALE_MS);
+      state.revokeTimer = setTimeout(() => {
+        state.stale = true;
+        if (state.url && !state.revoked) {
+          try {
+            URL.revokeObjectURL(state.url);
+            state.revoked = true;
+          } catch (_) {
+            // no-op
+          }
+        }
+      }, BLOB_REVOKE_MS);
+    };
+
+    const refresh = () => {
+      if (state.url && !state.revoked) {
+        try {
+          URL.revokeObjectURL(state.url);
+        } catch (_) {
+          // no-op
+        }
+      }
+      state.blob = new Blob([text], { type: mime });
+      state.url = URL.createObjectURL(state.blob);
+      state.stale = false;
+      state.revoked = false;
+      scheduleTimers();
+    };
+
+    refresh();
+
+    return {
+      getUrl() {
+        if (state.stale || state.revoked || !state.url) {
+          refresh();
+        }
+        return state.url;
+      },
+      getBlob() {
+        if (state.stale || state.revoked || !state.blob) {
+          refresh();
+        }
+        return state.blob;
+      },
+      markStale() {
+        state.stale = true;
+      },
+      cleanup(delayMs = DOWNLOAD_ANCHOR_DELAY_MS) {
+        clearTimeout(state.staleTimer);
+        clearTimeout(state.revokeTimer);
+        const currentUrl = state.url;
+        setTimeout(() => {
+          if (currentUrl && !state.revoked) {
+            try {
+              URL.revokeObjectURL(currentUrl);
+            } catch (_) {
+              // no-op
+            }
+            state.revoked = true;
+          }
+        }, delayMs);
+      },
+    };
+  };
+
+  const anchorDownload = (resource, filename) => {
     try {
-      const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
-      const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = blobUrl;
+      link.href = resource.getUrl();
       link.download = filename;
       link.style.cssText = 'position:absolute;left:-9999px;top:-9999px;opacity:0;';
       document.body.appendChild(link);
@@ -957,36 +1043,90 @@
 
       setTimeout(() => {
         link.remove();
-        try {
-          URL.revokeObjectURL(blobUrl);
-        } catch (_) {
-          // no-op
-        }
-      }, 500);
+        resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+      }, DOWNLOAD_ANCHOR_DELAY_MS);
       return true;
-    } catch (error) {
-      try {
-        const base64Content = btoa(unescape(encodeURIComponent(content)));
-        const dataUri = `data:${mimeType};base64,${base64Content}`;
+    } catch (err) {
+      log('error', 'Anchor download failed', err);
+      return false;
+    }
+  };
+
+  const dataUrlDownload = (resource, filename) => {
+    try {
+      const blob = resource.getBlob();
+      const reader = new FileReader();
+      reader.onload = () => {
+        const href = typeof reader.result === 'string' ? reader.result : '';
+        if (!href) {
+          resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+          return;
+        }
         const link = document.createElement('a');
-        link.href = dataUri;
+        link.href = href;
         link.download = filename;
         link.style.cssText = 'position:absolute;left:-9999px;top:-9999px;opacity:0;';
         document.body.appendChild(link);
+        link.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }));
+        setTimeout(() => {
+          link.remove();
+          resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+        }, DOWNLOAD_ANCHOR_DELAY_MS);
+      };
+      reader.onerror = () => resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+      reader.readAsDataURL(blob);
+      return true;
+    } catch (err) {
+      log('error', 'Data URL download failed', err);
+      return false;
+    }
+  };
 
-        const clickEvent = new MouseEvent('click', {
-          view: window,
-          bubbles: true,
-          cancelable: true
-        });
-        link.dispatchEvent(clickEvent);
-        setTimeout(() => link.remove(), 500);
-        return true;
-      } catch (fallbackError) {
-        log('error', 'Download failed', fallbackError);
-        alert('❗ Download failed. Try copying manually.');
-        return false;
+  function mobileDownload(content, filename, mimeType = 'text/plain') {
+    const resource = createDownloadResource(content, `${mimeType};charset=utf-8`);
+    const fallback = () => {
+      if (!anchorDownload(resource, filename)) {
+        dataUrlDownload(resource, filename);
       }
+    };
+
+    try {
+      if (gmDownloadLegacy || gmDownloadAsync) {
+        const usingLegacyOnly = !!gmDownloadLegacy && !gmDownloadAsync;
+        const cleanupDelay = gmDownloadAsync ? DOWNLOAD_ANCHOR_DELAY_MS : BLOB_REVOKE_MS;
+        const detail = {
+          url: resource.getUrl(),
+          name: filename,
+          saveAs: true,
+          onload: () => resource.cleanup(cleanupDelay),
+          onerror: () => {
+            resource.markStale();
+            fallback();
+          },
+        };
+        const result = gmDownloadAsync ? gmDownloadAsync(detail) : gmDownloadLegacy(detail);
+        if (usingLegacyOnly) {
+          fallback();
+        }
+        if (result && typeof result.then === 'function') {
+          result.then(() => resource.cleanup(cleanupDelay)).catch(() => {
+            resource.markStale();
+            fallback();
+          });
+        } else {
+          setTimeout(() => resource.cleanup(cleanupDelay), cleanupDelay);
+        }
+        return true;
+      }
+
+      fallback();
+      return true;
+    } catch (error) {
+      resource.markStale();
+      fallback();
+      log('error', 'Download failed', error);
+      alert('❗ Download failed. Try copying manually.');
+      return false;
     }
   }
 

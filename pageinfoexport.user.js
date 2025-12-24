@@ -2,7 +2,7 @@
 // @name         Export Full Page Info (XBrowser)
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
-// @version      2025.12.24.0055
+// @version      2025.12.24.0924
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -55,7 +55,7 @@
         /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
         '$1$2=[redacted]'
       );
-      if (/^https?:\\/\\//i.test(text)) {
+      if (/^https?:\/\//i.test(text)) {
         try {
           const url = new URL(text);
           text = `${url.origin}${url.pathname}`;
@@ -131,6 +131,10 @@
     dataUrlMaxChars: 800000,
     revokeDelayMs: 120000,
   };
+
+  const DOWNLOAD_ANCHOR_DELAY_MS = 500;
+  const BLOB_STALE_MS = 10000;
+  const BLOB_REVOKE_MS = 120000;
 
   const UI_IDS = {
     overlay: 'pageinfoexport-overlay',
@@ -664,24 +668,95 @@
     return files;
   }
 
-  function toBase64Utf8(text) {
-    const utf8 = new TextEncoder().encode(text);
-    const chunkSize = 0x8000;
-    let binary = '';
-    for (let i = 0; i < utf8.length; i += chunkSize) {
-      const chunk = utf8.subarray(i, i + chunkSize);
-      binary += String.fromCharCode.apply(null, chunk);
-    }
-    return btoa(binary);
-  }
+  const createDownloadResource = (text, mime, revokeDelayMs = DEFAULT_OPTIONS.revokeDelayMs) => {
+    const state = {
+      blob: null,
+      url: null,
+      stale: true,
+      revoked: false,
+      staleTimer: null,
+      revokeTimer: null,
+      revokeAfter: Math.max(revokeDelayMs || BLOB_REVOKE_MS, DOWNLOAD_ANCHOR_DELAY_MS),
+    };
 
-  function createBlobUrl(text, mime) {
-    const blob = new Blob([text], { type: mime });
-    const url = URL.createObjectURL(blob);
-    return { blob, url };
-  }
+    const scheduleTimers = () => {
+      clearTimeout(state.staleTimer);
+      clearTimeout(state.revokeTimer);
+      state.staleTimer = setTimeout(() => {
+        state.stale = true;
+      }, BLOB_STALE_MS);
+      state.revokeTimer = setTimeout(() => {
+        state.stale = true;
+        if (state.url && !state.revoked) {
+          try {
+            URL.revokeObjectURL(state.url);
+            state.revoked = true;
+          } catch (_) {
+            // no-op
+          }
+        }
+      }, state.revokeAfter);
+    };
 
-  async function saveWithFilePicker(filename, text, mime) {
+    const refresh = () => {
+      if (state.url && !state.revoked) {
+        try {
+          URL.revokeObjectURL(state.url);
+        } catch (_) {
+          // no-op
+        }
+      }
+      state.blob = new Blob([text], { type: mime });
+      state.url = URL.createObjectURL(state.blob);
+      state.stale = false;
+      state.revoked = false;
+      scheduleTimers();
+    };
+
+    refresh();
+
+    return {
+      getUrl() {
+        if (state.stale || state.revoked || !state.url) {
+          refresh();
+        }
+        return state.url;
+      },
+      getBlob() {
+        if (state.stale || state.revoked || !state.blob) {
+          refresh();
+        }
+        return state.blob;
+      },
+      markStale() {
+        state.stale = true;
+      },
+      cleanup(delayMs = DOWNLOAD_ANCHOR_DELAY_MS) {
+        clearTimeout(state.staleTimer);
+        clearTimeout(state.revokeTimer);
+        const currentUrl = state.url;
+        setTimeout(() => {
+          if (currentUrl && !state.revoked) {
+            try {
+              URL.revokeObjectURL(currentUrl);
+            } catch (_) {
+              // no-op
+            }
+            state.revoked = true;
+          }
+        }, delayMs);
+      },
+    };
+  };
+
+  const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(new Error('Failed to read blob as data URL'));
+    reader.readAsDataURL(blob);
+  });
+
+  async function saveWithFilePicker(filename, resource, mime) {
     if (!window.showSaveFilePicker) {
       return { attempted: false };
     }
@@ -696,15 +771,16 @@
         ],
       });
       const writable = await handle.createWritable();
-      await writable.write(new Blob([text], { type: mime }));
+      await writable.write(resource.getBlob());
       await writable.close();
+      resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
       return { attempted: true, success: true, method: 'file-picker' };
     } catch (err) {
       return { attempted: true, success: false, error: err, method: 'file-picker' };
     }
   }
 
-  async function saveWithGMDownload(filename, text, mime, revokeDelayMs) {
+  async function saveWithGMDownload(filename, resource, fallback) {
     const info = GMX.info();
     if (!GMX.hasDownload) {
       return { attempted: false };
@@ -712,65 +788,96 @@
     if (info && info.downloadMode === 'disabled') {
       return { attempted: true, success: false, method: 'gm-download', error: new Error('Downloads disabled') };
     }
-    try {
-      const { url } = createBlobUrl(text, mime);
-      const downloadPromise = GMX.download({
-        url,
-        name: filename,
-        saveAs: true,
-      });
-      if (downloadPromise && typeof downloadPromise.then === 'function') {
-        await downloadPromise;
+    let fallbackResult = null;
+    let resolveLegacy;
+    const legacyCompletion = new Promise((resolve) => {
+      resolveLegacy = resolve;
+    });
+    const handleError = async (err) => {
+      resource.markStale();
+      fallbackResult = await fallback(err);
+      if (resolveLegacy) {
+        resolveLegacy({ success: false });
+        resolveLegacy = null;
       }
-      setTimeout(() => {
-        try {
-          URL.revokeObjectURL(url);
-        } catch (_) {
-          // no-op
+    };
+
+    const downloadDetails = {
+      url: resource.getUrl(),
+      name: filename,
+      saveAs: true,
+      onload: () => {
+        resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+        if (resolveLegacy) {
+          resolveLegacy({ success: true });
+          resolveLegacy = null;
         }
-      }, revokeDelayMs);
-      return { attempted: true, success: true, method: 'gm-download' };
+      },
+      onerror: (err) => {
+        void handleError(err);
+      },
+    };
+
+    try {
+      const downloadPromise = GMX.download(downloadDetails);
+      if (downloadPromise && typeof downloadPromise.then === 'function') {
+        await downloadPromise.then(() => resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS)).catch(handleError);
+        resolveLegacy = null;
+      } else {
+        await legacyCompletion;
+        resolveLegacy = null;
+      }
     } catch (err) {
-      return { attempted: true, success: false, method: 'gm-download', error: err };
+      await handleError(err);
+      return {
+        attempted: true,
+        success: fallbackResult?.success || false,
+        method: fallbackResult?.method || 'gm-download',
+        error: err,
+      };
     }
+
+    if (fallbackResult) {
+      return fallbackResult;
+    }
+
+    return { attempted: true, success: true, method: 'gm-download' };
   }
 
-  function saveWithAnchor(filename, text, mime, revokeDelayMs) {
+  function saveWithAnchor(filename, resource) {
     try {
-      const { url } = createBlobUrl(text, mime);
       const anchor = GMX.addElement(document.body, 'a', {
-        href: url,
+        href: resource.getUrl(),
         download: filename,
       });
       anchor.style.display = 'none';
       anchor.click();
-      anchor.remove();
       setTimeout(() => {
-        try {
-          URL.revokeObjectURL(url);
-        } catch (_) {
-          // no-op
-        }
-      }, revokeDelayMs);
+        anchor.remove();
+        resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+      }, DOWNLOAD_ANCHOR_DELAY_MS);
       return { attempted: true, success: true, method: 'anchor-blob' };
     } catch (err) {
       return { attempted: true, success: false, method: 'anchor-blob', error: err };
     }
   }
 
-  function saveWithDataUrl(filename, text, maxChars) {
-    if (text.length > maxChars) {
+  async function saveWithDataUrl(filename, resource, textLength, maxChars) {
+    if (textLength > maxChars) {
       return { attempted: false };
     }
     try {
-      const dataUrl = `data:text/plain;charset=utf-8;base64,${toBase64Utf8(text)}`;
+      const dataUrl = await blobToDataUrl(resource.getBlob());
       const anchor = GMX.addElement(document.body, 'a', {
         href: dataUrl,
         download: filename,
       });
       anchor.style.display = 'none';
       anchor.click();
-      anchor.remove();
+      setTimeout(() => {
+        anchor.remove();
+        resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+      }, DOWNLOAD_ANCHOR_DELAY_MS);
       return { attempted: true, success: true, method: 'data-url' };
     } catch (err) {
       return { attempted: true, success: false, method: 'data-url', error: err };
@@ -780,7 +887,24 @@
   async function saveReport(payload, options) {
     const { filename, mime, text } = payload;
     let lastResult = null;
-    const picker = await saveWithFilePicker(filename, text, mime);
+    const resource = createDownloadResource(text, mime, options.revokeDelayMs);
+    const doFallback = async () => {
+      const anchorResult = saveWithAnchor(filename, resource);
+      if (anchorResult.success) {
+        return anchorResult;
+      }
+      lastResult = anchorResult;
+      const dataResult = await saveWithDataUrl(filename, resource, text.length, options.dataUrlMaxChars);
+      if (dataResult.attempted) {
+        if (dataResult.success) {
+          return dataResult;
+        }
+        lastResult = dataResult;
+      }
+      return null;
+    };
+
+    const picker = await saveWithFilePicker(filename, resource, mime);
     if (picker.attempted) {
       if (picker.success) {
         return picker;
@@ -788,7 +912,7 @@
       lastResult = picker;
     }
 
-    const gmResult = await saveWithGMDownload(filename, text, mime, options.revokeDelayMs);
+    const gmResult = await saveWithGMDownload(filename, resource, doFallback);
     if (gmResult.attempted) {
       if (gmResult.success) {
         return gmResult;
@@ -796,41 +920,12 @@
       lastResult = gmResult;
     }
 
-    const anchorResult = saveWithAnchor(filename, text, mime, options.revokeDelayMs);
-    if (anchorResult.success) {
-      return anchorResult;
-    }
-    lastResult = anchorResult;
-
-    const dataResult = saveWithDataUrl(filename, text, options.dataUrlMaxChars);
-    if (dataResult.attempted) {
-      if (dataResult.success) {
-        return dataResult;
-      }
-      lastResult = dataResult;
+    const fallbackResult = await doFallback();
+    if (fallbackResult) {
+      return fallbackResult;
     }
 
     return lastResult || { attempted: false, success: false, method: 'none' };
-  }
-      return picker;
-    }
-
-    const gmResult = await saveWithGMDownload(filename, text, mime, options.revokeDelayMs);
-    if (gmResult.attempted) {
-      return gmResult;
-    }
-
-    const anchorResult = saveWithAnchor(filename, text, mime, options.revokeDelayMs);
-    if (anchorResult.success) {
-      return anchorResult;
-    }
-
-    const dataResult = saveWithDataUrl(filename, text, options.dataUrlMaxChars);
-    if (dataResult.attempted) {
-      return dataResult;
-    }
-
-    return { attempted: false, success: false, method: 'none' };
   }
 
   function buildPreviewHtml(text) {
@@ -857,15 +952,9 @@
 
   function openPreviewTab(text) {
     const html = buildPreviewHtml(text);
-    const { url } = createBlobUrl(html, 'text/html;charset=utf-8');
-    GMX.openInTab(url, { background: false });
-    setTimeout(() => {
-      try {
-        URL.revokeObjectURL(url);
-      } catch (_) {
-        // no-op
-      }
-    }, DEFAULT_OPTIONS.revokeDelayMs);
+    const resource = createDownloadResource(html, 'text/html;charset=utf-8', DEFAULT_OPTIONS.revokeDelayMs);
+    GMX.openInTab(resource.getUrl(), { background: false });
+    resource.cleanup(DEFAULT_OPTIONS.revokeDelayMs);
   }
 
   function updateStatus(statusEl, message) {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0638
+// @version      2025.12.24.0924
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @match        *://*/*
@@ -16,6 +16,7 @@
 // @grant        GM_setClipboard
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_download
 // @require      https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/Readability.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/turndown/7.1.2/turndown.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/turndown-plugin-gfm/1.0.2/turndown-plugin-gfm.min.js
@@ -416,19 +417,187 @@
     return `${header}${markdownBody}${sourceLine}`;
   };
 
-  const triggerDownload = (markdown, filename) => {
-    const blob = new Blob([markdown], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename || DEFAULT_FILENAME;
-    anchor.style.display = 'none';
-    document.body.appendChild(anchor);
-    anchor.click();
-    requestAnimationFrame(() => {
-      URL.revokeObjectURL(url);
-      anchor.remove();
-    });
+  const gmDownloadLegacy = typeof GM_download === 'function' ? GM_download : null;
+  const gmDownloadAsync = typeof GM !== 'undefined' && GM && typeof GM.download === 'function'
+    ? GM.download.bind(GM)
+    : null;
+  const DOWNLOAD_ANCHOR_DELAY_MS = 500;
+  const BLOB_STALE_MS = 10000;
+  const BLOB_REVOKE_MS = 120000;
+
+  const createDownloadResource = (text, mime) => {
+    const state = {
+      blob: null,
+      url: null,
+      stale: true,
+      revoked: false,
+      staleTimer: null,
+      revokeTimer: null,
+    };
+
+    const scheduleTimers = () => {
+      clearTimeout(state.staleTimer);
+      clearTimeout(state.revokeTimer);
+      state.staleTimer = setTimeout(() => {
+        state.stale = true;
+      }, BLOB_STALE_MS);
+      state.revokeTimer = setTimeout(() => {
+        state.stale = true;
+        if (state.url && !state.revoked) {
+          try {
+            URL.revokeObjectURL(state.url);
+            state.revoked = true;
+          } catch (_) {
+            // no-op
+          }
+        }
+      }, BLOB_REVOKE_MS);
+    };
+
+    const refresh = () => {
+      if (state.url && !state.revoked) {
+        try {
+          URL.revokeObjectURL(state.url);
+        } catch (_) {
+          // no-op
+        }
+      }
+      state.blob = new Blob([text], { type: mime });
+      state.url = URL.createObjectURL(state.blob);
+      state.stale = false;
+      state.revoked = false;
+      scheduleTimers();
+    };
+
+    refresh();
+
+    return {
+      getUrl() {
+        if (state.stale || state.revoked || !state.url) {
+          refresh();
+        }
+        return state.url;
+      },
+      getBlob() {
+        if (state.stale || state.revoked || !state.blob) {
+          refresh();
+        }
+        return state.blob;
+      },
+      markStale() {
+        state.stale = true;
+      },
+      cleanup(delayMs = DOWNLOAD_ANCHOR_DELAY_MS) {
+        clearTimeout(state.staleTimer);
+        clearTimeout(state.revokeTimer);
+        const currentUrl = state.url;
+        setTimeout(() => {
+          if (currentUrl && !state.revoked) {
+            try {
+              URL.revokeObjectURL(currentUrl);
+            } catch (_) {
+              // no-op
+            }
+            state.revoked = true;
+          }
+        }, delayMs);
+      },
+    };
+  };
+
+  const downloadViaAnchor = (resource, filename) => {
+    try {
+      const url = resource.getUrl();
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename || DEFAULT_FILENAME;
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      setTimeout(() => {
+        anchor.remove();
+        resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+      }, DOWNLOAD_ANCHOR_DELAY_MS);
+      return true;
+    } catch (err) {
+      logError('Anchor download failed', { error: err?.message || String(err) });
+      return false;
+    }
+  };
+
+  const downloadViaDataUrl = (resource, filename) => {
+    try {
+      const blob = resource.getBlob();
+      const reader = new FileReader();
+      reader.onload = () => {
+        const href = typeof reader.result === 'string' ? reader.result : '';
+        if (!href) {
+          resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+          return;
+        }
+        const anchor = document.createElement('a');
+        anchor.href = href;
+        anchor.download = filename || DEFAULT_FILENAME;
+        anchor.style.display = 'none';
+        document.body.appendChild(anchor);
+        anchor.click();
+        setTimeout(() => {
+          anchor.remove();
+          resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+        }, DOWNLOAD_ANCHOR_DELAY_MS);
+      };
+      reader.onerror = () => {
+        resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+      };
+      reader.readAsDataURL(blob);
+      return true;
+    } catch (err) {
+      logError('Data URL download failed', { error: err?.message || String(err) });
+      return false;
+    }
+  };
+
+  const downloadViaGM = async (resource, filename, fallback) => {
+    if (!gmDownloadLegacy && !gmDownloadAsync) return false;
+    const detail = {
+      url: resource.getUrl(),
+      name: filename,
+      saveAs: true,
+      onload: () => resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS),
+      onerror: (err) => {
+        resource.markStale();
+        fallback(err);
+      },
+    };
+    try {
+      const result = gmDownloadAsync ? gmDownloadAsync(detail) : gmDownloadLegacy(detail);
+      if (result && typeof result.then === 'function') {
+        await result.then(() => resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS)).catch((err) => {
+          resource.markStale();
+          fallback(err);
+        });
+      } else {
+        setTimeout(() => resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS), DOWNLOAD_ANCHOR_DELAY_MS);
+      }
+      return true;
+    } catch (err) {
+      resource.markStale();
+      fallback(err);
+      return false;
+    }
+  };
+
+  const triggerDownload = async (markdown, filename) => {
+    const resource = createDownloadResource(markdown, 'text/markdown;charset=utf-8');
+    const safeName = filename || DEFAULT_FILENAME;
+    const fallback = () => {
+      if (downloadViaAnchor(resource, safeName)) return;
+      downloadViaDataUrl(resource, safeName);
+    };
+    const gmSuccess = await downloadViaGM(resource, safeName, fallback);
+    if (!gmSuccess) {
+      fallback();
+    }
   };
 
   const notify = (message) => {
@@ -449,7 +618,7 @@
       const { node, title } = extractMainContent({ aggressiveClutter: options.aggressiveClutter });
       const markdown = buildMarkdownDocument(node, title);
       const filename = sanitizeFilename(title || document.title || DEFAULT_FILENAME);
-      triggerDownload(markdown, filename);
+      await triggerDownload(markdown, filename);
       try {
         if (typeof GM_setClipboard === 'function') {
           GM_setClipboard(markdown, { type: 'text', mimetype: 'text/plain' });
