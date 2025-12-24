@@ -1,101 +1,110 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0319
-// @description  Converts a selected page element to Markdown with preview/export.
-// @author       cbkii (fork of shiquda)
+// @version      2025.12.24.0638
+// @description  Extracts the main article content and saves it as clean Markdown with a single click.
+// @author       cbkii
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pagemd.user.js
 // @downloadURL  https://raw.githubusercontent.com/cbkii/userscripts/main/pagemd.user.js
 // @homepageURL  https://github.com/cbkii/userscripts
 // @supportURL   https://github.com/cbkii/userscripts/issues
-// @run-at       document-end
+// @run-at       document-idle
 // @noframes
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
 // @grant        GM_setClipboard
-// @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_download
 // @require      https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
 // @require      https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js
+// @grant        GM_setValue
+// @require      https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/Readability.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/turndown/7.1.2/turndown.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/turndown-plugin-gfm/1.0.2/turndown-plugin-gfm.min.js
-// @require      https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js
 // @license      AGPL-3.0
 // ==/UserScript==
 
 /*
   Feature summary:
-  - Selects any element on the page and converts it to Markdown.
-  - Shows a live preview with copy/download options and optional Obsidian export.
+  - Extracts the primary article/content block, filters out nav/ads/comments, and rewrites relative URLs to absolute ones.
+  - Converts the cleaned content to Markdown with GFM (tables, fenced code, strikethrough, task lists) using Turndown.
+  - Provides a Tampermonkey menu item and a floating "Convert Page to Markdown" button that triggers an .md download.
 
   How it works:
-  - Uses tap-friendly controls to pick an element, then converts HTML to Markdown
-    and renders a preview modal for copy or download.
+  - Tries Mozilla Readability first for article extraction; falls back to heuristics that pick the densest main section.
+  - Cleans clutter, normalizes links/images, converts HTML to Markdown, and downloads a file named after the page title.
+  - Logs minimal debug info when DEBUG is true and shows user-friendly notifications for success/failure states.
 
   Configuration:
-  - Edit obsidianUserConfig to set vault paths. Activate via the userscript menu.
+  - Toggle DEBUG to true to see console logs.
+  - The floating button is idempotent; remove or restyle it by editing BUTTON_STYLES below.
 */
 
+(() => {
+  'use strict';
 
-(function () {
-    'use strict';
+  const DEBUG = false;
+  const LOG_PREFIX = '[pagemd]';
+  const LOG_STORAGE_KEY = 'userscript.logs.pagemd';
+  const LOG_MAX_ENTRIES = 200;
+  const BUTTON_ID = `pagemd-convert-button-${Math.random().toString(36).slice(2, 7)}`;
+  const BUTTON_TEXT = 'Convert Page to Markdown';
+  const DEFAULT_FILENAME = 'page.md';
+  const POST_IDLE_DELAY_MS = 350;
 
-    const DEBUG = false;
-    const LOG_PREFIX = '[pmd]';
-    const LOG_STORAGE_KEY = 'userscript.logs.pagemd';
-    const LOG_MAX_ENTRIES = 200;
-
-    const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
-        let debugEnabled = !!debug;
-        const SENSITIVE_KEY_RE = /pass(word)?|token|secret|auth|session|cookie|key/i;
-        const scrubString = (value) => {
-            if (typeof value !== 'string') return '';
-            let text = value.replace(
-                /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
-                '$1$2=[redacted]'
-            );
-            if (/^https?:\\/\\//i.test(text)) {
-                try {
-                    const url = new URL(text);
-                    text = `${url.origin}${url.pathname}`;
-                } catch (_) {}
-            }
-            return text.length > 200 ? `${text.slice(0, 200)}…` : text;
-        };
-        const describeElement = (value) => {
-            if (!value || !value.tagName) return 'element';
-            const id = value.id ? `#${value.id}` : '';
-            const classes = value.classList && value.classList.length
-                ? `.${Array.from(value.classList).slice(0, 2).join('.')}`
-                : '';
-            return `${value.tagName.toLowerCase()}${id}${classes}`;
-        };
-        const scrubValue = (value, depth = 0) => {
-            if (value == null) return value;
-            if (typeof value === 'string') return scrubString(value);
-            if (value instanceof Error) {
-                return { name: value.name, message: scrubString(value.message) };
-            }
-            if (typeof Element !== 'undefined' && value instanceof Element) {
-                return describeElement(value);
-            }
-            if (typeof value === 'object') {
-                if (depth >= 1) return '[truncated]';
-                if (Array.isArray(value)) {
-                    return value.slice(0, 4).map((item) => scrubValue(item, depth + 1));
-                }
-                const out = {};
-                Object.keys(value).slice(0, 4).forEach((key) => {
-                    out[key] = SENSITIVE_KEY_RE.test(key)
-                        ? '[redacted]'
-                        : scrubValue(value[key], depth + 1);
-                });
-                return out;
-            }
-            return value;
-        };
+  /**
+   * Structured logger compatible with userscriptlogs.user.js storage.
+   */
+  const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
+    let debugEnabled = !!debug;
+    const SENSITIVE_KEY_RE = /pass(word)?|token|secret|auth|session|cookie|key/i;
+    const scrubString = (value) => {
+      if (typeof value !== 'string') return '';
+      let text = value.replace(
+        /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
+        '$1$2=[redacted]'
+      );
+      if (/^https?:\/\//i.test(text)) {
+        try {
+          const url = new URL(text);
+          text = `${url.origin}${url.pathname}`;
+        } catch (_) {}
+      }
+      return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+    };
+    const describeElement = (value) => {
+      if (!value || !value.tagName) return 'element';
+      const id = value.id ? `#${value.id}` : '';
+      const classes = value.classList && value.classList.length
+        ? `.${Array.from(value.classList).slice(0, 2).join('.')}`
+        : '';
+      return `${value.tagName.toLowerCase()}${id}${classes}`;
+    };
+    const scrubValue = (value, depth = 0) => {
+      if (value == null) return value;
+      if (typeof value === 'string') return scrubString(value);
+      if (value instanceof Error) {
+        return { name: value.name, message: scrubString(value.message) };
+      }
+      if (typeof Element !== 'undefined' && value instanceof Element) {
+        return describeElement(value);
+      }
+      if (typeof value === 'object') {
+        if (depth >= 1) return '[truncated]';
+        if (Array.isArray(value)) {
+          return value.slice(0, 4).map((item) => scrubValue(item, depth + 1));
+        }
+        const out = {};
+        Object.keys(value).slice(0, 4).forEach((key) => {
+          out[key] = SENSITIVE_KEY_RE.test(key)
+            ? '[redacted]'
+            : scrubValue(value[key], depth + 1);
+        });
+        return out;
+      }
+      return value;
+    };
     const writeEntry = async (level, message, meta) => {
       try {
         const existing = await Promise.resolve(GM_getValue(storageKey, []));
@@ -118,553 +127,407 @@
         const payload = sanitized === undefined ? [] : [sanitized];
         console[method](prefix, msg, ...payload);
       }
-        };
-        log.setDebug = (value) => { debugEnabled = !!value; };
-        return log;
     };
+    log.setDebug = (value) => { debugEnabled = !!value; };
+    return log;
+  };
 
-    const log = createLogger({
-        prefix: LOG_PREFIX,
-        storageKey: LOG_STORAGE_KEY,
-        maxEntries: LOG_MAX_ENTRIES,
-        debug: DEBUG
-    });
+  const logger = createLogger({
+    prefix: LOG_PREFIX,
+    storageKey: LOG_STORAGE_KEY,
+    maxEntries: LOG_MAX_ENTRIES,
+    debug: DEBUG,
+  });
+  const logInfo = (msg, meta) => logger('info', msg, meta);
+  const logWarn = (msg, meta) => logger('warn', msg, meta);
+  const logError = (msg, meta) => logger('error', msg, meta);
+  const logDebug = (msg, meta) => logger('debug', msg, meta);
 
-    function main() {
+  /**
+   * Turndown setup with GitHub-flavored Markdown support and a few focused rules
+   * to keep code fences and alt text intact.
+   */
+  const turndownService = new TurndownService({
+    headingStyle: 'atx',
+    codeBlockStyle: 'fenced',
+    fence: '```',
+    emDelimiter: '*',
+    bulletListMarker: '-',
+    hr: '---',
+  });
 
-    // Obsidian
-    const obsidianUserConfig = {
-        /* Example:
-            "my note": [
-                "Inbox/Web/",
-                "Collection/Web/Reading/"
-            ]
-        */
-    }
+  // Enable GitHub-flavored Markdown extensions (tables, task lists, strikethrough).
+  turndownPluginGfm.gfm(turndownService);
 
-    const guide = `
-- Tap an element to highlight it
-- Use the on-screen toolbar to move the selection:
-    - Parent, Child, Prev, Next
-- Tap "Use selection" to export, or "Cancel" to exit
-    `
+  // Preserve figure captions and handle pre>code blocks with language classes.
+  turndownService.keep(['figure', 'figcaption']);
+  turndownService.addRule('codeBlocksWithLanguage', {
+    filter: (node) =>
+      node.nodeName === 'PRE' &&
+      node.firstElementChild &&
+      node.firstElementChild.nodeName === 'CODE',
+    replacement: (_content, node) => {
+      const codeEl = node.firstElementChild;
+      const languageMatch = (codeEl.className || '').match(/language-([\w-]+)/i);
+      const language = languageMatch ? languageMatch[1] : '';
+      const codeText = codeEl.textContent || '';
+      return `\n\n\`\`\`${language}\n${codeText}\n\`\`\`\n\n`;
+    },
+  });
 
-    // Global state
-    var isSelecting = false;
-    var selectedElement = null;
-    var selectionToolbar = null;
-    let obsidianConfig;
-    // Initialize Obsidian configuration
-    let storedObsidianConfig = GM_getValue('obsidianConfig');
-    if (Object.keys(obsidianUserConfig).length !== 0) {
-        GM_setValue('obsidianConfig', JSON.stringify(obsidianUserConfig));
-        obsidianConfig = obsidianUserConfig;
-    } else if (storedObsidianConfig) {
-        obsidianConfig = JSON.parse(storedObsidianConfig);
-    }
+  turndownService.addRule('betterImages', {
+    filter: 'img',
+    replacement: (_content, node) => {
+      const alt = node.getAttribute('alt') || '';
+      const src = node.getAttribute('src') || '';
+      return src ? `![${alt}](${src})` : '';
+    },
+  });
 
+  // Keep table header separators tidy for GFM tables even when cells contain pipes.
+  turndownService.addRule('escapePipesInTables', {
+    filter: (node) =>
+      (node.nodeName === 'TD' || node.nodeName === 'TH') &&
+      node.closest('table'),
+    replacement: (content) => content.replace(/\|/g, '\\|'),
+  });
 
+  // Ensure header separator rows exist even if stripped by the site.
+  turndownService.addRule('tableHeaderSeparators', {
+    filter: (node) => node.nodeName === 'THEAD',
+    replacement: (_content, node) => {
+      const headRow = node.querySelector('tr');
+      if (!headRow) return '';
+      const cells = Array.from(headRow.children).map((cell) => cell.textContent.trim() || ' ');
+      const header = `| ${cells.join(' | ')} |\n`;
+      const separator = `| ${cells.map(() => '---').join(' | ')} |`;
+      return `\n\n${header}${separator}\n`;
+    },
+  });
 
-    // HTML to Markdown
-    function convertToMarkdown(element) {
-        var html = element.outerHTML;
-        let turndownMd = turndownService.turndown(html);
-        turndownMd = turndownMd.replaceAll('[\n\n]', '[]'); // Temporary workaround for nested <a> elements
-        return turndownMd;
-    }
+  // Preserve inline code that may be wrapped in spans (common in docs sites).
+  turndownService.addRule('inlineCodeSpans', {
+    filter: (node) =>
+      node.nodeName === 'SPAN' &&
+      !node.closest('pre,code') &&
+      node.matches('[class*=\"code\" i],[class*=\"mono\" i],[class*=\"tt\" i]'),
+    replacement: (content) => `\`${content}\``,
+  });
 
+  /**
+   * Helper utilities.
+   */
+  const sanitizeFilename = (title) => {
+    if (!title) return DEFAULT_FILENAME;
+    const safe = title.trim().replace(/[\s]+/g, ' ').replace(/[\\/:*?"<>|]+/g, '_');
+    return safe ? `${safe}.md` : DEFAULT_FILENAME;
+  };
 
-    // Preview
-    function showMarkdownModal(markdown) {
-        var $modal = $(`
-                    <div class="h2m-modal-overlay">
-                        <div class="h2m-modal">
-                            <textarea>${markdown}</textarea>
-                            <div class="h2m-preview">${marked.parse(markdown)}</div>
-                            <div class="h2m-buttons">
-                                <button class="h2m-copy">Copy to clipboard</button>
-                                <button class="h2m-download">Download as MD</button>
-                                <select class="h2m-obsidian-select">Send to Obsidian</select>
-                            </div>
-                            <button class="h2m-close">X</button>
-                        </div>
-                    </div>
-                `);
-
-
-        $modal.find('.h2m-obsidian-select').append($('<option>').val('').text('Send to Obsidian'));
-        for (const vault in obsidianConfig) {
-            for (const path of obsidianConfig[vault]) {
-                // Insert elements
-                const $option = $('<option>')
-                    .val(`obsidian://advanced-uri?vault=${vault}&filepath=${path}`)
-                    .text(`${vault}: ${path}`);
-                $modal.find('.h2m-obsidian-select').append($option);
-            }
-        }
-
-        $modal.find('textarea').on('input', function () {
-            // console.log("Input event triggered");
-            var markdown = $(this).val();
-            var html = marked.parse(markdown);
-            // console.log("Markdown:", markdown);
-            // console.log("HTML:", html);
-            $modal.find('.h2m-preview').html(html);
-        });
-
-        $modal.on('keydown', function (e) {
-            if (e.key === 'Escape') {
-                $modal.remove();
-            }
-        });
-
-
-        $modal.find('.h2m-copy').on('click', function () { // Copy to clipboard
-            GM_setClipboard($modal.find('textarea').val());
-            $modal.find('.h2m-copy').text('Copied!');
-            setTimeout(() => {
-                $modal.find('.h2m-copy').text('Copy to clipboard');
-            }, 1000);
-        });
-
-        $modal.find('.h2m-download').on('click', function () { // Download
-            const markdown = $modal.find('textarea').val();
-            const safeTitle = (document.title || 'page')
-                .replace(/\s+/g, ' ')
-                .replace(/[\\/:*?"<>|]+/g, '')
-                .trim() || 'page';
-            const filename = `${safeTitle}-${new Date().toISOString().replace(/[:.]/g, '-')}.md`;
-            const gmDownloadFn = typeof GM_download === 'function'
-                ? GM_download
-                : (typeof GM !== 'undefined' && typeof GM.download === 'function'
-                    ? GM.download.bind(GM)
-                    : null);
-            const anchorDownload = (url, cleanup) => {
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => {
-                    document.body.removeChild(a);
-                    cleanup();
-                }, 500);
-            };
-            const startDownload = (blob) => {
-                let url = '';
-                let urlStale = false;
-                let urlRevoked = false;
-                const buildUrl = () => {
-                    if (url && !urlStale) return url;
-                    if (url && !urlRevoked) {
-                        try { URL.revokeObjectURL(url); } catch (_) {}
-                    }
-                    url = URL.createObjectURL(blob);
-                    urlStale = false;
-                    urlRevoked = false;
-                    return url;
-                };
-                const cleanup = (() => {
-                    let cleaned = false;
-                    return () => {
-                        if (cleaned) return;
-                        cleaned = true;
-                        const activeUrl = buildUrl();
-                        try {
-                            URL.revokeObjectURL(activeUrl);
-                        } catch (_) {
-                            // ignore
-                        }
-                        urlRevoked = true;
-                        url = '';
-                    };
-                })();
-                const safetyTimer = setTimeout(() => { urlStale = true; }, 15000);
-                const wrappedCleanup = () => {
-                    clearTimeout(safetyTimer);
-                    cleanup();
-                };
-
-                if (gmDownloadFn) {
-                    try {
-                        gmDownloadFn({
-                            url: buildUrl(),
-                            name: filename,
-                            saveAs: false,
-                            onload: wrappedCleanup,
-                            ontimeout: wrappedCleanup,
-                            onerror: (err) => {
-                                log('warn', 'GM_download failed, falling back', err);
-                                anchorDownload(buildUrl(), wrappedCleanup);
-                            }
-                        })?.then?.(() => wrappedCleanup())
-                          ?.catch?.((err) => {
-                              log('warn', 'GM_download promise rejected, falling back', err);
-                              anchorDownload(buildUrl(), wrappedCleanup);
-                          });
-                        return;
-                    } catch (err) {
-                        log('warn', 'GM_download threw; falling back', err);
-                        // fall through to anchor fallback without revoking early
-                    }
-                }
-
-                anchorDownload(buildUrl(), wrappedCleanup);
-            };
-
-            startDownload(new Blob([markdown], { type: 'text/markdown' }));
-        });
-
-        $modal.find('.h2m-obsidian-select').on('change', function () { // Send to Obsidian
-            const val = $(this).val();
-            if (!val) return;
-            const markdown = $modal.find('textarea').val();
-            GM_setClipboard(markdown);
-            const title = document.title.replaceAll(/[\\/:*?"<>|]/g, '_'); // File names cannot contain: * " \\ / < > : | ?
-            const url = `${val}${title}.md&clipboard=true`;
-            window.open(url);
-        });
-
-        $modal.find('.h2m-close').on('click', function () { // Close button
-            $modal.remove();
-        });
-
-        // Sync scrolling
-        // Get both elements
-        var $textarea = $modal.find('textarea');
-        var $preview = $modal.find('.h2m-preview');
-        var isScrolling = false;
-
-        // When the textarea scrolls, sync the preview position
-        $textarea.on('scroll', function () {
-            if (isScrolling) {
-                isScrolling = false;
-                return;
-            }
-            var scrollPercentage = this.scrollTop / (this.scrollHeight - this.offsetHeight);
-            $preview[0].scrollTop = scrollPercentage * ($preview[0].scrollHeight - $preview[0].offsetHeight);
-            isScrolling = true;
-        });
-
-        // When the preview scrolls, sync the textarea position
-        $preview.on('scroll', function () {
-            if (isScrolling) {
-                isScrolling = false;
-                return;
-            }
-            var scrollPercentage = this.scrollTop / (this.scrollHeight - this.offsetHeight);
-            $textarea[0].scrollTop = scrollPercentage * ($textarea[0].scrollHeight - $textarea[0].offsetHeight);
-            isScrolling = true;
-        });
-
-        $(document).on('keydown', function (e) {
-            if (e.key === 'Escape' && $('.h2m-modal-overlay').length > 0) {
-                $('.h2m-modal-overlay').remove();
-            }
-        });
-
-        $('body').append($modal);
-    }
-
-    // Start selection
-    function updateSelection(element) {
-        if (!element) return;
-        if (selectedElement) {
-            $(selectedElement).removeClass('h2m-selection-box');
-        }
-        selectedElement = element;
-        $(selectedElement).addClass('h2m-selection-box');
-    }
-
-    function normalizeSelection(element) {
-        if (!element) return null;
-        if (element.tagName === 'HTML') {
-            return document.body || element;
-        }
-        if (element.tagName === 'BODY') {
-            return element.firstElementChild || element;
-        }
-        return element;
-    }
-
-    function moveSelection(direction) {
-        if (!selectedElement) return;
-        let next = selectedElement;
-        switch (direction) {
-            case 'parent':
-                next = selectedElement.parentElement || selectedElement;
-                break;
-            case 'child':
-                next = selectedElement.firstElementChild || selectedElement;
-                break;
-            case 'prev': {
-                let prev = selectedElement.previousElementSibling;
-                while (!prev && selectedElement.parentElement) {
-                    selectedElement = selectedElement.parentElement;
-                    prev = selectedElement.previousElementSibling;
-                }
-                next = prev || selectedElement;
-                break;
-            }
-            case 'next': {
-                let nextEl = selectedElement.nextElementSibling;
-                while (!nextEl && selectedElement.parentElement) {
-                    selectedElement = selectedElement.parentElement;
-                    nextEl = selectedElement.nextElementSibling;
-                }
-                next = nextEl || selectedElement;
-                break;
-            }
-            default:
-                break;
-        }
-        updateSelection(normalizeSelection(next));
-    }
-
-    function buildToolbar() {
-        if (selectionToolbar) return;
-        selectionToolbar = $(`
-            <div class="h2m-toolbar">
-                <button class="h2m-btn-parent">Parent</button>
-                <button class="h2m-btn-child">Child</button>
-                <button class="h2m-btn-prev">Prev</button>
-                <button class="h2m-btn-next">Next</button>
-                <button class="h2m-btn-use">Use selection</button>
-                <button class="h2m-btn-cancel">Cancel</button>
-            </div>
-        `);
-
-        selectionToolbar.find('.h2m-btn-parent').on('click', () => moveSelection('parent'));
-        selectionToolbar.find('.h2m-btn-child').on('click', () => moveSelection('child'));
-        selectionToolbar.find('.h2m-btn-prev').on('click', () => moveSelection('prev'));
-        selectionToolbar.find('.h2m-btn-next').on('click', () => moveSelection('next'));
-        selectionToolbar.find('.h2m-btn-use').on('click', () => {
-            if (!selectedElement) return;
-            const markdown = convertToMarkdown(selectedElement);
-            showMarkdownModal(markdown);
-            endSelecting();
-        });
-        selectionToolbar.find('.h2m-btn-cancel').on('click', () => endSelecting());
-
-        $('body').append(selectionToolbar);
-    }
-
-    function startSelecting() {
-        $('body').addClass('h2m-no-scroll'); // Prevent page scrolling
-        isSelecting = true;
-        const initial = normalizeSelection(document.activeElement || document.body);
-        updateSelection(initial);
-        buildToolbar();
-        // Instructions
-        tip(marked.parse(guide));
-    }
-
-    // End selection
-    function endSelecting() {
-        isSelecting = false;
-        $('.h2m-selection-box').removeClass('h2m-selection-box');
-        $('body').removeClass('h2m-no-scroll');
-        $('.h2m-tip').remove();
-        if (selectionToolbar) {
-            selectionToolbar.remove();
-            selectionToolbar = null;
-        }
-    }
-
-    function tip(message, timeout = null) {
-        var $tipElement = $('<div>')
-            .addClass('h2m-tip')
-            .html(message)
-            .appendTo('body')
-            .hide()
-            .fadeIn(200);
-        if (timeout === null) {
-            return;
-        }
-        setTimeout(function () {
-            $tipElement.fadeOut(200, function () {
-                $tipElement.remove();
-            });
-        }, timeout);
-    }
-
-    // Turndown configuration
-    var turndownPluginGfm = TurndownPluginGfmService;
-    var turndownService = new TurndownService({ codeBlockStyle: 'fenced' });
-
-    turndownPluginGfm.gfm(turndownService); // Enable all plugins
-    // turndownService.addRule('strikethrough', {
-    //     filter: ['del', 's', 'strike'],
-    //     replacement: function (content) {
-    //         return '~' + content + '~'
-    //     }
-    // });
-
-    // turndownService.addRule('latex', {
-    //     filter: ['mjx-container'],
-    //     replacement: function (content, node) {
-    //         const text = node.querySelector('img')?.title;
-    //         const isInline = !node.getAttribute('display');
-    //         if (text) {
-    //             if (isInline) {
-    //                 return '$' + text + '$'
-    //             }
-    //             else {
-    //                 return '$$' + text + '$$'
-    //             }
-    //         }
-    //         return '';
-    //     }
-    // });
-
-
-
-
-    // Add CSS styles
-    GM_addStyle(`
-        .h2m-selection-box {
-            border: 2px dashed #f00;
-            background-color: rgba(255, 0, 0, 0.2);
-        }
-        .h2m-no-scroll {
-            overflow: hidden;
-            z-index: 9997;
-        }
-        .h2m-modal {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 80%;
-            height: 80%;
-            background: white;
-            border-radius: 10px;
-            display: flex;
-            flex-direction: row;
-            z-index: 9999;
-        }
-        .h2m-modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.5);
-            z-index: 9998;
-        }
-        .h2m-modal textarea,
-        .h2m-modal .h2m-preview {
-            width: 50%;
-            height: 100%;
-            padding: 20px;
-            box-sizing: border-box;
-            overflow-y: auto;
-        }
-        .h2m-modal .h2m-buttons {
-            position: absolute;
-            bottom: 10px;
-            right: 10px;
-        }
-        .h2m-modal .h2m-buttons button,
-        .h2m-modal .h2m-obsidian-select {
-            margin-left: 10px;
-            background-color: #4CAF50; /* Green */
-            border: none;
-            color: white;
-            padding: 13px 16px;
-            border-radius: 10px;
-            text-align: center;
-            text-decoration: none;
-            display: inline-block;
-            font-size: 16px;
-            transition-duration: 0.4s;
-            cursor: pointer;
-        }
-        .h2m-modal .h2m-buttons button:hover,
-        .h2m-modal .h2m-obsidian-select:hover {
-            background-color: #45a049;
-        }
-        .h2m-modal .h2m-close {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            cursor: pointer;
-            width: 25px;
-            height: 25px;
-            background-color: #f44336;
-            color: white;
-            font-size: 16px;
-            border-radius: 50%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        .h2m-tip {
-            position: fixed;
-            top: 22%;
-            left: 82%;
-            transform: translate(-50%, -50%);
-            background-color: white;
-            border: 1px solid black;
-            padding: 8px;
-            z-index: 9999;
-            border-radius: 10px;
-            box-shadow: 5px 5px 10px rgba(0, 0, 0, 0.5);
-            background-color: rgba(255, 255, 255, 0.7);
-        }
-        .h2m-toolbar {
-            position: fixed;
-            bottom: 12px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 9999;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            background: rgba(0, 0, 0, 0.75);
-            padding: 10px 12px;
-            border-radius: 12px;
-            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
-        }
-        .h2m-toolbar button {
-            border: none;
-            border-radius: 10px;
-            padding: 10px 12px;
-            font-size: 14px;
-            color: #fff;
-            background: #4CAF50;
-            cursor: pointer;
-        }
-        .h2m-toolbar .h2m-btn-cancel {
-            background: #f44336;
-        }
-        .h2m-toolbar .h2m-btn-use {
-            background: #2196f3;
-        }
-    `);
-
-    // Register triggers
-    GM_registerMenuCommand('Convert to Markdown', function () {
-        startSelecting()
-    });
-
-
-    const handleSelectEvent = function (e) {
-        if (!isSelecting) return;
-        if ($(e.target).closest('.h2m-toolbar, .h2m-modal, .h2m-modal-overlay, .h2m-tip').length) return;
-        e.preventDefault();
-        updateSelection(normalizeSelection(e.target));
-    };
-
-    $(document)
-        .on('touchstart.h2m-select', handleSelectEvent)
-        .on('mousedown.h2m-select', handleSelectEvent);
-
-    }
-
+  const toAbsoluteUrl = (url) => {
+    if (!url) return url;
     try {
-        main();
-    } catch (err) {
-        log('error', 'fatal error', err);
+      return new URL(url, location.href).href;
+    } catch (_) {
+      return url;
     }
+  };
+
+  const removeElements = (root, selectors) => {
+    selectors.forEach((selector) => {
+      root.querySelectorAll(selector).forEach((node) => node.remove());
+    });
+  };
+
+  const rewriteRelativeUrls = (root) => {
+    root.querySelectorAll('a[href]').forEach((anchor) => {
+      const href = anchor.getAttribute('href');
+      if (!href || href.startsWith('javascript:') || href.startsWith('#')) return;
+      anchor.setAttribute('href', toAbsoluteUrl(href));
+    });
+
+    const setSrc = (el, attr) => {
+      const value = el.getAttribute(attr);
+      if (value) el.setAttribute(attr, toAbsoluteUrl(value));
+    };
+
+    root.querySelectorAll('img[src], source[src], video[src], audio[src], iframe[src]').forEach((el) => {
+      setSrc(el, 'src');
+    });
+
+    root.querySelectorAll('img[srcset], source[srcset]').forEach((el) => {
+      const srcset = el.getAttribute('srcset');
+      if (!srcset) return;
+      const absoluteSet = srcset
+        .split(',')
+        .map((entry) => {
+          const [urlPart, descriptor] = entry.trim().split(/\s+/);
+          return [toAbsoluteUrl(urlPart), descriptor].filter(Boolean).join(' ');
+        })
+        .join(', ');
+      el.setAttribute('srcset', absoluteSet);
+    });
+  };
+
+  const stripClutter = (root, { aggressive } = { aggressive: true }) => {
+    removeElements(root, [
+      'script',
+      'style',
+      'noscript',
+      'template',
+      'iframe',
+      'canvas',
+      'svg',
+      'form',
+      'input',
+      'button',
+      'select',
+      'option',
+      'label',
+      'textarea',
+      'aside',
+      'footer',
+      'header',
+      'nav',
+      '[role="navigation"]',
+      '[aria-label*="breadcrumb" i]',
+      '[aria-label*="comment" i]',
+      '[id*="comment" i]',
+      '[class*="comment" i]',
+      '[class*="breadcrumb" i]',
+      '[class*="advert" i]',
+      '[id*="advert" i]',
+    ]);
+    if (aggressive) {
+      removeElements(root, [
+        '[class*="share" i]',
+        '[class*="signup" i]',
+        '[class*="modal" i]',
+        '[data-testid*="share" i]',
+      ]);
+    }
+  };
+
+  const pickLargestNode = (candidates) => {
+    let best = null;
+    let bestScore = 0;
+    candidates.forEach((node) => {
+      const text = (node.textContent || '').trim();
+      const score = text.length;
+      if (score > bestScore) {
+        best = node;
+        bestScore = score;
+      }
+    });
+    return best;
+  };
+
+  const extractWithReadability = () => {
+    if (typeof Readability === 'undefined') return null;
+    const clonedDoc = document.implementation.createHTMLDocument(document.title || '');
+    const htmlClone = document.documentElement.cloneNode(true);
+    clonedDoc.replaceChild(clonedDoc.importNode(htmlClone, true), clonedDoc.documentElement);
+    try {
+      const article = new Readability(clonedDoc, { keepClasses: false }).parse();
+      if (article && article.content) {
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = article.content;
+        stripClutter(wrapper, { aggressive: false });
+        rewriteRelativeUrls(wrapper);
+        return { node: wrapper, title: article.title || document.title };
+      }
+    } catch (err) {
+      logWarn('Readability extraction failed', { error: err?.message || String(err) });
+    }
+    return null;
+  };
+
+  const extractWithHeuristics = ({ aggressiveClutter } = { aggressiveClutter: true }) => {
+    const workingRoot = document.body.cloneNode(true);
+    stripClutter(workingRoot, { aggressive: aggressiveClutter });
+    const candidateSelectors = [
+      'article',
+      'main',
+      '#main',
+      '#main-content',
+      '#mainContent',
+      '[role="main"]',
+      '.article',
+      '.article__content',
+      '.article__body',
+      '.article__main',
+      '.post',
+      '.post-article',
+      '.entry-content',
+      '.content',
+      '#content',
+      '.markdown-body',
+      '.documentation',
+      '.doc-content',
+      '.doc-main',
+      '.doc-body',
+      '.docs-content',
+      '.docs-main',
+      '.docs-body',
+      '.guide-content',
+      '.guide-body',
+      '.guide-main',
+      '.page-content',
+      '.page-body',
+      '.page-main',
+      '.blog-post',
+      '.blog-content',
+      '.story-body',
+      '.story-content',
+      '.article-body',
+      '.article-content',
+      '.post-content',
+      '.post-body',
+      '.post__content',
+      '.entry',
+      '.entry-body',
+      '.entry-text',
+      '.reader-content',
+      '.read__content',
+      '.rich-text',
+      '.richtext',
+      '.prose',
+      '[itemprop="articleBody"], [itemprop="mainEntityOfPage"]',
+      '[data-article-body]',
+      '[data-testid*="article" i]',
+      'section',
+    ];
+
+    const candidates = candidateSelectors
+      .map((selector) => Array.from(workingRoot.querySelectorAll(selector)))
+      .flat();
+
+    const best = pickLargestNode(candidates.filter(Boolean)) || workingRoot;
+    const node = best.cloneNode(true);
+    return { node, title: document.title };
+  };
+
+  const extractMainContent = (opts = {}) =>
+    extractWithReadability() || extractWithHeuristics({ aggressiveClutter: opts.aggressiveClutter !== false });
+
+  const buildMarkdownDocument = (htmlNode, title) => {
+    const workingNode = htmlNode.cloneNode(true);
+    stripClutter(workingNode, { aggressive: true });
+    rewriteRelativeUrls(workingNode);
+    const markdownBody = turndownService.turndown(workingNode).trim();
+    const header = title ? `# ${title}\n\n` : '';
+    const sourceLine = `\n\n---\nSource: ${location.href}`;
+    return `${header}${markdownBody}${sourceLine}`;
+  };
+
+  const triggerDownload = (markdown, filename) => {
+    const blob = new Blob([markdown], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename || DEFAULT_FILENAME;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    requestAnimationFrame(() => {
+      URL.revokeObjectURL(url);
+      anchor.remove();
+    });
+  };
+
+  const notify = (message) => {
+    const existing = document.getElementById('pagemd-toast');
+    if (existing) existing.remove();
+    const toast = document.createElement('div');
+    toast.id = 'pagemd-toast';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3200);
+  };
+
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const handleConvert = async (options = {}) => {
+    try {
+      await wait(POST_IDLE_DELAY_MS);
+      const { node, title } = extractMainContent({ aggressiveClutter: options.aggressiveClutter });
+      const markdown = buildMarkdownDocument(node, title);
+      const filename = sanitizeFilename(title || document.title || DEFAULT_FILENAME);
+      triggerDownload(markdown, filename);
+      try {
+        if (typeof GM_setClipboard === 'function') {
+          GM_setClipboard(markdown, { type: 'text', mimetype: 'text/plain' });
+        }
+      } catch (clipErr) {
+        logWarn('Clipboard copy failed', { error: clipErr?.message || String(clipErr) });
+      }
+      notify(`Markdown saved${markdown.length ? ` (${markdown.length} chars)` : ''}`);
+      logInfo('Conversion complete', { filename, length: markdown.length });
+    } catch (err) {
+      logError('Conversion failed', { error: err?.message || String(err) });
+      notify('Convert Page to Markdown failed. See console for details.');
+    }
+  };
+
+  const injectButton = () => {
+    if (document.getElementById(BUTTON_ID)) return;
+    const button = document.createElement('button');
+    button.id = BUTTON_ID;
+    button.type = 'button';
+    button.textContent = BUTTON_TEXT;
+    button.setAttribute('aria-label', BUTTON_TEXT);
+    button.setAttribute('title', BUTTON_TEXT);
+    button.addEventListener('click', () => handleConvert({ aggressiveClutter: true }), { passive: true });
+    button.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      handleConvert({ aggressiveClutter: false });
+    });
+    document.body.appendChild(button);
+  };
+
+  const BUTTON_STYLES = `
+    #${BUTTON_ID} {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      z-index: 2147483647;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.2);
+      cursor: pointer;
+    }
+    #${BUTTON_ID}:active { transform: translateY(1px); }
+    #${BUTTON_ID}:hover { background: #1d4ed8; }
+    #pagemd-toast {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      z-index: 2147483647;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+    }
+  `;
+
+  const main = () => {
+    GM_addStyle(BUTTON_STYLES);
+    injectButton();
+    GM_registerMenuCommand(BUTTON_TEXT, () => handleConvert({ aggressiveClutter: true }));
+    GM_registerMenuCommand(`${BUTTON_TEXT} (no cleanup)`, () => handleConvert({ aggressiveClutter: false }));
+    logInfo('Userscript ready');
+  };
+
+  try {
+    main();
+  } catch (err) {
+    logError('Initialization failed', { error: err?.message || String(err) });
+  }
 })();
