@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0620
+// @version      2025.12.24.0638
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @match        *://*/*
@@ -14,6 +14,8 @@
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
 // @grant        GM_setClipboard
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @require      https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/Readability.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/turndown/7.1.2/turndown.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/turndown-plugin-gfm/1.0.2/turndown-plugin-gfm.min.js
@@ -41,22 +43,102 @@
 
   const DEBUG = false;
   const LOG_PREFIX = '[pagemd]';
+  const LOG_STORAGE_KEY = 'userscript.logs.pagemd';
+  const LOG_MAX_ENTRIES = 200;
   const BUTTON_ID = `pagemd-convert-button-${Math.random().toString(36).slice(2, 7)}`;
   const BUTTON_TEXT = 'Convert Page to Markdown';
   const DEFAULT_FILENAME = 'page.md';
   const POST_IDLE_DELAY_MS = 350;
 
   /**
-   * Lightweight logger with optional DEBUG gating.
+   * Structured logger compatible with userscriptlogs.user.js storage.
    */
-  const log = (...args) => {
-    if (DEBUG) {
-      console.log(LOG_PREFIX, ...args);
-    }
+  const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
+    let debugEnabled = !!debug;
+    const SENSITIVE_KEY_RE = /pass(word)?|token|secret|auth|session|cookie|key/i;
+    const scrubString = (value) => {
+      if (typeof value !== 'string') return '';
+      let text = value.replace(
+        /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
+        '$1$2=[redacted]'
+      );
+      if (/^https?:\/\//i.test(text)) {
+        try {
+          const url = new URL(text);
+          text = `${url.origin}${url.pathname}`;
+        } catch (_) {}
+      }
+      return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+    };
+    const describeElement = (value) => {
+      if (!value || !value.tagName) return 'element';
+      const id = value.id ? `#${value.id}` : '';
+      const classes = value.classList && value.classList.length
+        ? `.${Array.from(value.classList).slice(0, 2).join('.')}`
+        : '';
+      return `${value.tagName.toLowerCase()}${id}${classes}`;
+    };
+    const scrubValue = (value, depth = 0) => {
+      if (value == null) return value;
+      if (typeof value === 'string') return scrubString(value);
+      if (value instanceof Error) {
+        return { name: value.name, message: scrubString(value.message) };
+      }
+      if (typeof Element !== 'undefined' && value instanceof Element) {
+        return describeElement(value);
+      }
+      if (typeof value === 'object') {
+        if (depth >= 1) return '[truncated]';
+        if (Array.isArray(value)) {
+          return value.slice(0, 4).map((item) => scrubValue(item, depth + 1));
+        }
+        const out = {};
+        Object.keys(value).slice(0, 4).forEach((key) => {
+          out[key] = SENSITIVE_KEY_RE.test(key)
+            ? '[redacted]'
+            : scrubValue(value[key], depth + 1);
+        });
+        return out;
+      }
+      return value;
+    };
+    const writeEntry = async (level, message, meta) => {
+      try {
+        const existing = await Promise.resolve(GM_getValue(storageKey, []));
+        const list = Array.isArray(existing) ? existing : [];
+        list.push({ ts: new Date().toISOString(), level, message, meta });
+        if (list.length > maxEntries) {
+          list.splice(0, list.length - maxEntries);
+        }
+        await Promise.resolve(GM_setValue(storageKey, list));
+      } catch (_) {}
+    };
+    const log = (level, message, meta) => {
+      if (level === 'debug' && !debugEnabled) return;
+      const msg = typeof message === 'string' ? scrubString(message) : 'event';
+      const data = typeof message === 'string' ? meta : message;
+      const sanitized = data === undefined ? undefined : scrubValue(data);
+      writeEntry(level, msg, sanitized).catch(() => {});
+      if (debugEnabled || level === 'warn' || level === 'error') {
+        const method = level === 'debug' ? 'log' : level;
+        const payload = sanitized === undefined ? [] : [sanitized];
+        console[method](prefix, msg, ...payload);
+      }
+    };
+    log.setDebug = (value) => { debugEnabled = !!value; };
+    return log;
   };
 
-  const warn = (...args) => console.warn(LOG_PREFIX, ...args);
-  const error = (...args) => console.error(LOG_PREFIX, ...args);
+  const logger = createLogger({
+    prefix: LOG_PREFIX,
+    storageKey: LOG_STORAGE_KEY,
+    maxEntries: LOG_MAX_ENTRIES,
+    debug: DEBUG,
+  });
+  const logInfo = (msg, meta) => logger('info', msg, meta);
+  const logWarn = (msg, meta) => logger('warn', msg, meta);
+  const logError = (msg, meta) => logger('error', msg, meta);
+  const logDebug = (msg, meta) => logger('debug', msg, meta);
 
   /**
    * Turndown setup with GitHub-flavored Markdown support and a few focused rules
@@ -251,7 +333,7 @@
         return { node: wrapper, title: article.title || document.title };
       }
     } catch (err) {
-      warn('Readability extraction failed', err);
+      logWarn('Readability extraction failed', { error: err?.message || String(err) });
     }
     return null;
   };
@@ -373,12 +455,12 @@
           GM_setClipboard(markdown, { type: 'text', mimetype: 'text/plain' });
         }
       } catch (clipErr) {
-        warn('Clipboard copy failed', clipErr);
+        logWarn('Clipboard copy failed', { error: clipErr?.message || String(clipErr) });
       }
       notify(`Markdown saved${markdown.length ? ` (${markdown.length} chars)` : ''}`);
-      log('Conversion complete', { filename, length: markdown.length });
+      logInfo('Conversion complete', { filename, length: markdown.length });
     } catch (err) {
-      error('Conversion failed', err);
+      logError('Conversion failed', { error: err?.message || String(err) });
       notify('Convert Page to Markdown failed. See console for details.');
     }
   };
@@ -437,12 +519,12 @@
     injectButton();
     GM_registerMenuCommand(BUTTON_TEXT, () => handleConvert({ aggressiveClutter: true }));
     GM_registerMenuCommand(`${BUTTON_TEXT} (no cleanup)`, () => handleConvert({ aggressiveClutter: false }));
-    log('Userscript ready');
+    logInfo('Userscript ready');
   };
 
   try {
     main();
   } catch (err) {
-    error('Initialization failed', err);
+    logError('Initialization failed', { error: err?.message || String(err) });
   }
 })();
