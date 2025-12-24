@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.23.1657
+// @version      2025.12.24.0014
 // @description  Accelerates download countdown timers and enables download controls.
 // @author       cbkii
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:up|down|load|dl|mirror|drain|transfer)[a-z0-9-]*|[a-z0-9-]*(?:up|down|load|dl|mirror|drain|transfer))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
@@ -52,10 +52,12 @@
                 /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
                 '$1$2=[redacted]'
             );
-            try {
-                const url = new URL(text);
-                text = `${url.origin}${url.pathname}`;
-            } catch (_) {}
+            if (/^https?:\\/\\//i.test(text)) {
+                try {
+                    const url = new URL(text);
+                    text = `${url.origin}${url.pathname}`;
+                } catch (_) {}
+            }
             return text.length > 200 ? `${text.slice(0, 200)}…` : text;
         };
         const describeElement = (value) => {

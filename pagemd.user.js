@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.23.1657
+// @version      2025.12.24.0014
 // @description  Converts a selected page element to Markdown with preview/export.
 // @author       cbkii (fork of shiquda)
 // @match        *://*/*
@@ -55,10 +55,12 @@
                 /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
                 '$1$2=[redacted]'
             );
-            try {
-                const url = new URL(text);
-                text = `${url.origin}${url.pathname}`;
-            } catch (_) {}
+            if (/^https?:\\/\\//i.test(text)) {
+                try {
+                    const url = new URL(text);
+                    text = `${url.origin}${url.pathname}`;
+                } catch (_) {}
+            }
             return text.length > 200 ? `${text.slice(0, 200)}…` : text;
         };
         const describeElement = (value) => {

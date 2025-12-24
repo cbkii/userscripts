@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii (mobile UI by Claude)
 // @description  Mobile Google search helper with filters, dorks, and a compact UI.
-// @version      2025.12.23.1657
+// @version      2025.12.24.0014
 // @require      https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
 // @require      https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js
 // @match        *://www.google.*/search*
@@ -61,10 +61,12 @@
         /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
         '$1$2=[redacted]'
       );
-      try {
-        const url = new URL(text);
-        text = `${url.origin}${url.pathname}`;
-      } catch (_) {}
+      if (/^https?:\\/\\//i.test(text)) {
+        try {
+          const url = new URL(text);
+          text = `${url.origin}${url.pathname}`;
+        } catch (_) {}
+      }
       return text.length > 200 ? `${text.slice(0, 200)}…` : text;
     };
     const describeElement = (value) => {
