@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0712
+// @version      2025.12.24.0924
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions.
 // @author       cbcoz
 // @match        *://chat.openai.com/*
@@ -1058,7 +1058,10 @@
       const reader = new FileReader();
       reader.onload = () => {
         const href = typeof reader.result === 'string' ? reader.result : '';
-        if (!href) return;
+        if (!href) {
+          resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+          return;
+        }
         const link = document.createElement('a');
         link.href = href;
         link.download = filename;
@@ -1089,24 +1092,29 @@
 
     try {
       if (gmDownloadLegacy || gmDownloadAsync) {
+        const usingLegacyOnly = !!gmDownloadLegacy && !gmDownloadAsync;
+        const cleanupDelay = gmDownloadAsync ? DOWNLOAD_ANCHOR_DELAY_MS : BLOB_REVOKE_MS;
         const detail = {
           url: resource.getUrl(),
           name: filename,
           saveAs: true,
-          onload: () => resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS),
+          onload: () => resource.cleanup(cleanupDelay),
           onerror: () => {
             resource.markStale();
             fallback();
           },
         };
         const result = gmDownloadAsync ? gmDownloadAsync(detail) : gmDownloadLegacy(detail);
+        if (usingLegacyOnly) {
+          fallback();
+        }
         if (result && typeof result.then === 'function') {
-          result.then(() => resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS)).catch(() => {
+          result.then(() => resource.cleanup(cleanupDelay)).catch(() => {
             resource.markStale();
             fallback();
           });
         } else {
-          setTimeout(() => resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS), DOWNLOAD_ANCHOR_DELAY_MS);
+          setTimeout(() => resource.cleanup(cleanupDelay), cleanupDelay);
         }
         return true;
       }

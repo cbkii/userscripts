@@ -2,7 +2,7 @@
 // @name         Export Full Page Info (XBrowser)
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
-// @version      2025.12.24.0712
+// @version      2025.12.24.0924
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -793,18 +793,12 @@
     const legacyCompletion = new Promise((resolve) => {
       resolveLegacy = resolve;
     });
-    const legacyTimeout = setTimeout(() => {
-      if (resolveLegacy) {
-        resolveLegacy({ success: false, timeout: true });
-      }
-    }, BLOB_REVOKE_MS);
     const handleError = async (err) => {
       resource.markStale();
       fallbackResult = await fallback(err);
       if (resolveLegacy) {
         resolveLegacy({ success: false });
         resolveLegacy = null;
-        clearTimeout(legacyTimeout);
       }
     };
 
@@ -817,7 +811,6 @@
         if (resolveLegacy) {
           resolveLegacy({ success: true });
           resolveLegacy = null;
-          clearTimeout(legacyTimeout);
         }
       },
       onerror: (err) => {
@@ -829,11 +822,9 @@
       const downloadPromise = GMX.download(downloadDetails);
       if (downloadPromise && typeof downloadPromise.then === 'function') {
         await downloadPromise.then(() => resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS)).catch(handleError);
-        clearTimeout(legacyTimeout);
         resolveLegacy = null;
       } else {
         await legacyCompletion;
-        clearTimeout(legacyTimeout);
         resolveLegacy = null;
       }
     } catch (err) {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0712
+// @version      2025.12.24.0924
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @match        *://*/*
@@ -531,7 +531,10 @@
       const reader = new FileReader();
       reader.onload = () => {
         const href = typeof reader.result === 'string' ? reader.result : '';
-        if (!href) return;
+        if (!href) {
+          resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+          return;
+        }
         const anchor = document.createElement('a');
         anchor.href = href;
         anchor.download = filename || DEFAULT_FILENAME;
