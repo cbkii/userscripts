@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Log Viewer
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.23.1657
+// @version      2025.12.24.0014
 // @description  View and clear stored userscript logs from a simple on-page dialog.
 // @author       cbkii
 // @match        *://*/*
@@ -56,10 +56,12 @@
         /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
         '$1$2=[redacted]'
       );
-      try {
-        const url = new URL(text);
-        text = `${url.origin}${url.pathname}`;
-      } catch (_) {}
+      if (/^https?:\/\//i.test(text)) {
+        try {
+          const url = new URL(text);
+          text = `${url.origin}${url.pathname}`;
+        } catch (_) {}
+      }
       return text.length > 200 ? `${text.slice(0, 200)}…` : text;
     };
     const scrubValue = (value, depth = 0) => {
@@ -147,12 +149,14 @@
       }
       if (!Array.isArray(list)) return;
       list.forEach((entry) => {
+        if (!entry || typeof entry !== 'object') return;
+        const meta = Array.isArray(entry.meta) ? entry.meta : [];
         entries.push({
           script,
           ts: entry.ts || '',
           level: entry.level || 'info',
           message: entry.message || '',
-          meta: entry.meta || [],
+          meta,
         });
       });
     });

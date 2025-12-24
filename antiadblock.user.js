@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.23.1657
+// @version      2025.12.24.0014
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @match        *://*/*
@@ -60,10 +60,12 @@
         /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
         '$1$2=[redacted]'
       );
-      try {
-        const url = new URL(text);
-        text = `${url.origin}${url.pathname}`;
-      } catch (_) {}
+      if (/^https?:\\/\\//i.test(text)) {
+        try {
+          const url = new URL(text);
+          text = `${url.origin}${url.pathname}`;
+        } catch (_) {}
+      }
       return text.length > 200 ? `${text.slice(0, 200)}…` : text;
     };
     const describeElement = (value) => {
