@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0041
+// @version      2025.12.24.0055
 // @description  Accelerates download countdown timers and enables download controls.
 // @author       cbkii
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:up|down|load|dl|mirror|drain|transfer)[a-z0-9-]*|[a-z0-9-]*(?:up|down|load|dl|mirror|drain|transfer))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
@@ -108,10 +108,7 @@
             const msg = typeof message === 'string' ? scrubString(message) : 'event';
             const data = typeof message === 'string' ? meta : message;
             const sanitized = data === undefined ? undefined : scrubValue(data);
-            const writePromise = writeEntry(level, msg, sanitized);
-            if (writePromise && typeof writePromise.catch === 'function') {
-                writePromise.catch(() => {});
-            }
+            writeEntry(level, msg, sanitized).catch(() => {});
             if (debugEnabled || level === 'warn' || level === 'error') {
                 const method = level === 'debug' ? 'log' : level;
                 const payload = sanitized === undefined ? [] : [sanitized];

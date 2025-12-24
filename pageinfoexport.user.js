@@ -2,7 +2,7 @@
 // @name         Export Full Page Info (XBrowser)
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
-// @version      2025.12.24.0041
+// @version      2025.12.24.0055
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -111,10 +111,7 @@
       const msg = typeof message === 'string' ? scrubString(message) : 'event';
       const data = typeof message === 'string' ? meta : message;
       const sanitized = data === undefined ? undefined : scrubValue(data);
-      const writePromise = writeEntry(level, msg, sanitized);
-      if (writePromise && typeof writePromise.catch === 'function') {
-        writePromise.catch(() => {});
-      }
+      writeEntry(level, msg, sanitized).catch(() => {});
       if (debugEnabled || level === 'warn' || level === 'error') {
         const method = level === 'debug' ? 'log' : level;
         const payload = sanitized === undefined ? [] : [sanitized];

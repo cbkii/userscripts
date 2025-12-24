@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Router Contrast Dark Mode
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0041
+// @version      2025.12.24.0055
 // @description  High-contrast dark mode for the VX230V router UI.
 // @match        http://192.168.1.1/*
 // @match        https://192.168.1.1/*
@@ -101,10 +101,7 @@
       const msg = typeof message === 'string' ? scrubString(message) : 'event';
       const data = typeof message === 'string' ? meta : message;
       const sanitized = data === undefined ? undefined : scrubValue(data);
-      const writePromise = writeEntry(level, msg, sanitized);
-      if (writePromise && typeof writePromise.catch === 'function') {
-        writePromise.catch(() => {});
-      }
+      writeEntry(level, msg, sanitized).catch(() => {});
       if (debugEnabled || level === 'warn' || level === 'error') {
         const method = level === 'debug' ? 'log' : level;
         const payload = sanitized === undefined ? [] : [sanitized];
