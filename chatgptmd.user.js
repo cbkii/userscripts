@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.1711
+// @version      2025.12.24.1742
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions.
 // @author       cbcoz
 // @match        *://chat.openai.com/*
@@ -236,7 +236,6 @@
         });
         state.menuIds = [];
       }
-      if (!hasUnregister && state.menuIds.length) return;
       state.menuIds.push(GM_registerMenuCommand(
         `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
         async () => { await setEnabled(!state.enabled); }
@@ -494,7 +493,6 @@
     cancelBtn.type = 'button';
     cancelBtn.textContent = '❌ Cancel';
     cancelBtn.style.cssText = `${legacyButtonStyle()};background:#1b2436;color:#f8fafc;margin-top:12px;`;
-    cancelBtn.addEventListener('click', () => popup.remove());
 
     popup.appendChild(title);
     popup.appendChild(optionsRow);
@@ -503,15 +501,36 @@
 
     document.body.appendChild(popup);
 
-    popup.addEventListener('click', (ev) => {
-      if (ev.target === popup) popup.remove();
-    });
-    document.addEventListener('keydown', function escapeHandler(e) {
-      if (e.key === 'Escape') {
+    let observer = null;
+    const cleanup = () => {
+      document.removeEventListener('keydown', escapeHandler);
+      if (observer) observer.disconnect();
+      observer = null;
+    };
+
+    const removePopup = () => {
+      if (popup.parentNode) {
         popup.remove();
-        document.removeEventListener('keydown', escapeHandler);
+      }
+      cleanup();
+    };
+
+    popup.addEventListener('click', (ev) => {
+      if (ev.target === popup) removePopup();
+    });
+    const escapeHandler = (e) => {
+      if (e.key === 'Escape') {
+        removePopup();
+      }
+    };
+    document.addEventListener('keydown', escapeHandler);
+    observer = new MutationObserver(() => {
+      if (!popup.isConnected) {
+        cleanup();
       }
     });
+    observer.observe(document.body, { childList: true, subtree: true });
+    cancelBtn.addEventListener('click', () => removePopup());
   }
 
   async function exportChat({ format, action }) {

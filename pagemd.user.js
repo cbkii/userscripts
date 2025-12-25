@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.1711
+// @version      2025.12.24.1742
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @match        *://*/*
@@ -758,9 +758,6 @@
         try { GM_unregisterMenuCommand(id); } catch (_) { /* no-op */ }
       });
       state.menuIds = [];
-    }
-    if (!hasUnregister && state.menuIds.length) {
-      return;
     }
     state.menuIds.push(GM_registerMenuCommand(
       `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,

@@ -74,7 +74,6 @@ This is the **canonical scaffold** for all userscripts in this repo. Apply it to
   function registerMenu() {
     if (typeof GM_registerMenuCommand !== 'function') return;
     if (hasUnregister && state.menuIds.length) { state.menuIds.forEach(id => { try { GM_unregisterMenuCommand(id); } catch (_) {} }); state.menuIds = []; }
-    if (!hasUnregister && state.menuIds.length) return;
     state.menuIds.push(GM_registerMenuCommand(
       `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
       async () => { await setEnabled(!state.enabled); }
@@ -96,8 +95,9 @@ This is the **canonical scaffold** for all userscripts in this repo. Apply it to
   async function start() { if (state.started) return; state.started = true; main(); }
   async function stop() { state.started = false; /* teardown observers/UI */ }
 
-  function init() {
-    setEnabled(gmStore.get(ENABLE_KEY, true));
+  async function init() {
+    const saved = await gmStore.get(ENABLE_KEY, true);
+    await setEnabled(saved);
     if (sharedUi) {
       sharedUi.registerScript({ id: SCRIPT_ID, title: SCRIPT_TITLE, enabled: state.enabled, render: renderPanel, onToggle: (next) => setEnabled(next) });
     }

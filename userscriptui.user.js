@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Shared UI Manager
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.1711
+// @version      2025.12.24.1742
 // @description  Provides a shared hotpink dock + dark modal with per-script tabs, toggles, and persistent layout for all userscripts.
 // @author       cbkii
 // @match        *://*/*
@@ -462,8 +462,11 @@
       if (entry.enabled && !state.activeId) {
         state.activeId = entry.id;
       }
-      if (!entry.enabled && entry._cachedNode && entry._cachedNode.parentNode === state.panel) {
-        state.panel.innerHTML = '';
+      if (!entry.enabled) {
+        if (entry._cachedNode && entry._cachedNode.parentNode === state.panel) {
+          state.panel.innerHTML = '';
+        }
+        entry._cachedNode = null;
       }
       if (entry.id === state.activeId && !entry.enabled) {
         const next = Array.from(state.scripts.values()).find((s) => s.enabled && s.id !== entry.id);
@@ -495,16 +498,19 @@
     };
   };
 
-  root.__userscriptSharedUi = {
-    getInstance(adapter) {
-      root.__userscriptSharedUiAdapterRef = root.__userscriptSharedUiAdapterRef || { current: null };
-      if (adapter) {
-        root.__userscriptSharedUiAdapterRef.current = adapter;
+  root.__userscriptSharedUi = (() => {
+    const adapterRef = { current: null };
+    let instance = null;
+    return {
+      getInstance(adapter) {
+        if (adapter) {
+          adapterRef.current = adapter;
+        }
+        if (!instance) {
+          instance = createUi(adapterRef);
+        }
+        return instance;
       }
-      if (!root.__userscriptSharedUiInstance) {
-        root.__userscriptSharedUiInstance = createUi(root.__userscriptSharedUiAdapterRef);
-      }
-      return root.__userscriptSharedUiInstance;
-    }
-  };
+    };
+  })();
 })(typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);

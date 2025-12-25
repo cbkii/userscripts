@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Log Viewer
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.1711
+// @version      2025.12.24.1742
 // @description  View and clear stored userscript logs from a simple on-page dialog.
 // @author       cbkii
 // @match        *://*/*
@@ -466,9 +466,6 @@
         try { GM_unregisterMenuCommand(id); } catch (_) {}
       });
       state.menuIds = [];
-    }
-    if (!hasUnregister && state.menuIds.length) {
-      return;
     }
     state.menuIds.push(GM_registerMenuCommand(
       `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
