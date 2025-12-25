@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0924
+// @version      2025.12.24.1742
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @match        *://*/*
@@ -13,10 +13,12 @@
 // @noframes
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // @grant        GM_setClipboard
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_download
+// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // @require      https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/Readability.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/turndown/7.1.2/turndown.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/turndown-plugin-gfm/1.0.2/turndown-plugin-gfm.min.js
@@ -36,7 +38,7 @@
 
   Configuration:
   - Toggle DEBUG to true to see console logs.
-  - The floating button is idempotent; remove or restyle it by editing BUTTON_STYLES below.
+  - Controls live inside the shared modal panel; a fallback floating button is available when the shared UI is unavailable.
 */
 
 (() => {
@@ -46,8 +48,11 @@
   const LOG_PREFIX = '[pagemd]';
   const LOG_STORAGE_KEY = 'userscript.logs.pagemd';
   const LOG_MAX_ENTRIES = 200;
-  const BUTTON_ID = `pagemd-convert-button-${Math.random().toString(36).slice(2, 7)}`;
-  const BUTTON_TEXT = 'Convert Page to Markdown';
+  const SCRIPT_ID = 'pagemd';
+  const SCRIPT_TITLE = 'Page ➜ Markdown';
+  const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+  const FALLBACK_BUTTON_ID = 'pagemd-convert-button';
+  const FALLBACK_BUTTON_TEXT = 'Page → Markdown';
   const DEFAULT_FILENAME = 'page.md';
   const POST_IDLE_DELAY_MS = 350;
 
@@ -600,6 +605,46 @@
     }
   };
 
+  const TOAST_STYLES = `
+    #pagemd-toast {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      z-index: 2147483647;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+    }
+  `;
+
+  const gmStore = {
+    async get(key, fallback) {
+      try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
+    },
+    async set(key, value) {
+      try { await GM_setValue(key, value); } catch (_) {}
+    }
+  };
+
+  const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
+    ? window.__userscriptSharedUi.getInstance({
+      get: (key, fallback) => gmStore.get(key, fallback),
+      set: (key, value) => gmStore.set(key, value)
+    })
+    : null;
+
+  const state = {
+    enabled: true,
+    started: false,
+    menuIds: []
+  };
+
+  const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
+
   const notify = (message) => {
     const existing = document.getElementById('pagemd-toast');
     if (existing) existing.remove();
@@ -613,6 +658,10 @@
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const handleConvert = async (options = {}) => {
+    if (!state.enabled) {
+      logInfo('Conversion skipped because script is disabled');
+      return;
+    }
     try {
       await wait(POST_IDLE_DELAY_MS);
       const { node, title } = extractMainContent({ aggressiveClutter: options.aggressiveClutter });
@@ -634,66 +683,151 @@
     }
   };
 
-  const injectButton = () => {
-    if (document.getElementById(BUTTON_ID)) return;
+  const renderPanel = () => {
+    const wrapper = document.createElement('div');
+    wrapper.style.display = 'flex';
+    wrapper.style.flexDirection = 'column';
+    wrapper.style.gap = '10px';
+
+    const description = document.createElement('p');
+    description.textContent = 'Convert the current page to Markdown. Hold for a clean extract or include raw HTML.';
+    description.style.margin = '0';
+    description.style.fontSize = '13px';
+    description.style.lineHeight = '1.4';
+    wrapper.appendChild(description);
+
+    const buttonsRow = document.createElement('div');
+    buttonsRow.style.display = 'flex';
+    buttonsRow.style.gap = '8px';
+    buttonsRow.style.flexWrap = 'wrap';
+
+    const makeButton = (label, opts) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = label;
+      btn.style.padding = '8px 10px';
+      btn.style.borderRadius = '8px';
+      btn.style.border = '1px solid rgba(255,255,255,0.16)';
+      btn.style.background = '#1f2937';
+      btn.style.color = '#f8fafc';
+      btn.style.cursor = 'pointer';
+      btn.addEventListener('click', () => handleConvert(opts));
+      return btn;
+    };
+
+    buttonsRow.appendChild(makeButton('Convert (clean)', { aggressiveClutter: true }));
+    buttonsRow.appendChild(makeButton('Convert (raw)', { aggressiveClutter: false }));
+    wrapper.appendChild(buttonsRow);
+
+    return wrapper;
+  };
+
+  const teardown = () => {
+    state.started = false;
+    const toast = document.getElementById('pagemd-toast');
+    if (toast) toast.remove();
+    const fallbackBtn = document.getElementById(FALLBACK_BUTTON_ID);
+    if (fallbackBtn) fallbackBtn.remove();
+  };
+
+  const start = async () => {
+    if (state.started) return;
+    state.started = true;
+    try { GM_addStyle(TOAST_STYLES); } catch (_) {}
+    logInfo('Userscript ready');
+  };
+
+  const setEnabled = async (value) => {
+    state.enabled = value;
+    await gmStore.set(ENABLE_KEY, state.enabled);
+    if (sharedUi) {
+      sharedUi.setScriptEnabled(SCRIPT_ID, state.enabled);
+    }
+    if (!state.enabled) {
+      teardown();
+    } else {
+      await start();
+    }
+    registerMenu();
+  };
+
+  const registerMenu = () => {
+    if (typeof GM_registerMenuCommand !== 'function') return;
+    if (hasUnregister && state.menuIds.length) {
+      state.menuIds.forEach((id) => {
+        try { GM_unregisterMenuCommand(id); } catch (_) { /* no-op */ }
+      });
+      state.menuIds = [];
+    }
+    state.menuIds.push(GM_registerMenuCommand(
+      `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+      async () => { await setEnabled(!state.enabled); }
+    ));
+    if (state.enabled) {
+      state.menuIds.push(GM_registerMenuCommand('Convert Page to Markdown', () => handleConvert({ aggressiveClutter: true })));
+      state.menuIds.push(GM_registerMenuCommand('Convert (no cleanup)', () => handleConvert({ aggressiveClutter: false })));
+    }
+  };
+
+  const injectFallbackButton = () => {
+    if (sharedUi) return;
+    if (document.getElementById(FALLBACK_BUTTON_ID)) return;
     const button = document.createElement('button');
-    button.id = BUTTON_ID;
+    button.id = FALLBACK_BUTTON_ID;
     button.type = 'button';
-    button.textContent = BUTTON_TEXT;
-    button.setAttribute('aria-label', BUTTON_TEXT);
-    button.setAttribute('title', BUTTON_TEXT);
+    button.textContent = FALLBACK_BUTTON_TEXT;
+    button.title = 'Tap to save cleaned Markdown; long-press for raw HTML kept';
+    button.style.cssText = `
+      position: fixed;
+      bottom: 14px;
+      right: 14px;
+      z-index: 2147483647;
+      background: linear-gradient(145deg, #0d0d12, #151528);
+      color: #f8fafc;
+      border: 1px solid #ff70c6;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      box-shadow: 0 14px 28px rgba(0,0,0,0.48);
+      cursor: pointer;
+      letter-spacing: 0.01em;
+    `;
     button.addEventListener('click', () => handleConvert({ aggressiveClutter: true }), { passive: true });
     button.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       handleConvert({ aggressiveClutter: false });
     });
-    document.body.appendChild(button);
+    const append = () => document.body && document.body.appendChild(button);
+    if (document.body) {
+      append();
+    } else {
+      document.addEventListener('DOMContentLoaded', append, { once: true });
+    }
   };
 
-  const BUTTON_STYLES = `
-    #${BUTTON_ID} {
-      position: fixed;
-      bottom: 16px;
-      right: 16px;
-      z-index: 2147483647;
-      background: #2563eb;
-      color: #fff;
-      border: none;
-      border-radius: 10px;
-      padding: 10px 14px;
-      font-size: 14px;
-      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
-      box-shadow: 0 8px 18px rgba(0,0,0,0.2);
-      cursor: pointer;
+  const init = async () => {
+    state.enabled = await gmStore.get(ENABLE_KEY, true);
+    if (sharedUi) {
+      sharedUi.registerScript({
+        id: SCRIPT_ID,
+        title: SCRIPT_TITLE,
+        enabled: state.enabled,
+        render: renderPanel,
+        onToggle: (next) => setEnabled(next)
+      });
     }
-    #${BUTTON_ID}:active { transform: translateY(1px); }
-    #${BUTTON_ID}:hover { background: #1d4ed8; }
-    #pagemd-toast {
-      position: fixed;
-      bottom: 16px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.85);
-      color: #fff;
-      padding: 10px 14px;
-      border-radius: 10px;
-      font-size: 13px;
-      z-index: 2147483647;
-      box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+    if (state.enabled) {
+      await start();
     }
-  `;
-
-  const main = () => {
-    GM_addStyle(BUTTON_STYLES);
-    injectButton();
-    GM_registerMenuCommand(BUTTON_TEXT, () => handleConvert({ aggressiveClutter: true }));
-    GM_registerMenuCommand(`${BUTTON_TEXT} (no cleanup)`, () => handleConvert({ aggressiveClutter: false }));
-    logInfo('Userscript ready');
+    registerMenu();
+    if (state.enabled) {
+      injectFallbackButton();
+    }
   };
 
-  try {
-    main();
-  } catch (err) {
+  init().catch((err) => {
     logError('Initialization failed', { error: err?.message || String(err) });
-  }
+  });
 })();

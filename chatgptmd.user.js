@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0924
+// @version      2025.12.24.1742
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions.
 // @author       cbcoz
 // @match        *://chat.openai.com/*
@@ -12,10 +12,13 @@
 // @supportURL   https://github.com/cbkii/userscripts/issues
 // @run-at       document-idle
 // @noframes
+// @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // @grant        GM_setClipboard
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_download
+// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // ==/UserScript==
 
 /*
@@ -45,6 +48,31 @@
     apiMode: false,
     citations: true
   };
+  const SCRIPT_ID = 'chatgptmd';
+  const SCRIPT_TITLE = 'ChatGPT Exporter';
+  const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+  const gmStore = {
+    async get(key, fallback) {
+      try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
+    },
+    async set(key, value) {
+      try { await GM_setValue(key, value); } catch (_) {}
+    }
+  };
+  const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
+    ? window.__userscriptSharedUi.getInstance({
+      get: (key, fallback) => gmStore.get(key, fallback),
+      set: (key, value) => gmStore.set(key, value)
+    })
+    : null;
+  const state = {
+    enabled: true,
+    started: false,
+    menuIds: [],
+    observers: [],
+    historyPatched: false
+  };
+  const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
   const LOG_STORAGE_KEY = 'userscript.logs.chatgptmd';
   const LOG_MAX_ENTRIES = 200;
@@ -139,171 +167,151 @@
     debug: DEBUG
   });
 
-  function main() {
-    wrapHistory('pushState');
-    wrapHistory('replaceState');
-    window.addEventListener('popstate', scheduleEnsureButtons);
-    observeUiChanges();
-    scheduleEnsureButtons();
-  }
+  async function main() {
+    state.enabled = await gmStore.get(ENABLE_KEY, true);
 
-  function scheduleEnsureButtons() {
-    if (scheduleEnsureButtons._scheduled) return;
-    scheduleEnsureButtons._scheduled = true;
-    requestAnimationFrame(() => {
-      scheduleEnsureButtons._scheduled = false;
-      ensureButtons();
-    });
-  }
-
-  function ensureButtons() {
-    if (document.getElementById(BUTTONS_ID)) return;
-    const inputWrapper = findInputWrapper();
-    if (inputWrapper) {
-      injectButtons(inputWrapper);
-    }
-  }
-
-  function observeUiChanges() {
-    let debounceId = 0;
-    const observer = new MutationObserver(() => {
+    const ensureButtons = () => {
       if (document.getElementById(BUTTONS_ID)) return;
-      if (debounceId) return;
-      debounceId = window.setTimeout(() => {
-        debounceId = 0;
-        scheduleEnsureButtons();
-      }, 250);
-    });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-  }
-
-  function wrapHistory(method) {
-    const original = history[method];
-    if (!original) return;
-    history[method] = function (...args) {
-      const result = original.apply(this, args);
-      scheduleEnsureButtons();
-      return result;
+      const inputWrapper = findInputWrapper();
+      if (inputWrapper) {
+        injectButtons(inputWrapper);
+      }
     };
-  }
 
-  function findInputWrapper() {
-    return document.querySelector('form')?.parentElement || null;
-  }
+    const observeUiChanges = () => {
+      let debounceId = 0;
+      const observer = new MutationObserver(() => {
+        if (document.getElementById(BUTTONS_ID)) return;
+        if (debounceId) return;
+        debounceId = window.setTimeout(() => {
+          debounceId = 0;
+          ensureButtons();
+        }, 250);
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      state.observers.push(observer);
+    };
 
-  function injectButtons(container) {
-    const wrapper = document.createElement('div');
-    wrapper.id = BUTTONS_ID;
-    wrapper.dataset.chatgptExporter = '1';
-    wrapper.style.cssText =
-      'margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-start;z-index:9999;' +
-      'background:#f1f1f1;padding:8px;border-bottom:1px solid #ccc;';
+    const wrapHistory = (method) => {
+      const original = history[method];
+      if (!original || state.historyPatched) return;
+      history[method] = function (...args) {
+        const result = original.apply(this, args);
+        ensureButtons();
+        return result;
+      };
+      state.historyPatched = true;
+    };
 
-    const quickBtn = document.createElement('button');
-    quickBtn.type = 'button';
-    quickBtn.innerText = '⬇️ Quick Export (.md)';
-    quickBtn.style.cssText = btnStyle();
-    quickBtn.addEventListener('click', () => {
-      void exportChat({ format: 'md', action: 'download' });
-    });
+    const teardownLegacyUi = () => {
+      document.getElementById(BUTTONS_ID)?.remove();
+      document.getElementById(POPUP_ID)?.remove();
+      state.observers.forEach((obs) => { try { obs.disconnect(); } catch (_) {} });
+      state.observers = [];
+    };
 
-    const moreBtn = document.createElement('button');
-    moreBtn.type = 'button';
-    moreBtn.innerText = '⚙️ More Options';
-    moreBtn.style.cssText = btnStyle();
-    moreBtn.addEventListener('click', showOptionsDialog);
+    const start = async () => {
+      if (state.started) return;
+      state.started = true;
+      if (!sharedUi) {
+        wrapHistory('pushState');
+        wrapHistory('replaceState');
+        window.addEventListener('popstate', ensureButtons);
+        observeUiChanges();
+        ensureButtons();
+      }
+    };
 
-    wrapper.appendChild(quickBtn);
-    wrapper.appendChild(moreBtn);
+    const stop = async () => {
+      if (!state.started) return;
+      state.started = false;
+      teardownLegacyUi();
+    };
 
-    if (container === document.body) {
-      container.insertBefore(wrapper, container.firstChild);
-    } else {
-      container.appendChild(wrapper);
+    const registerMenu = () => {
+      if (typeof GM_registerMenuCommand !== 'function') return;
+      if (hasUnregister && state.menuIds.length) {
+        state.menuIds.forEach((id) => {
+          try { GM_unregisterMenuCommand(id); } catch (_) {}
+        });
+        state.menuIds = [];
+      }
+      state.menuIds.push(GM_registerMenuCommand(
+        `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+        async () => { await setEnabled(!state.enabled); }
+      ));
+      if (state.enabled) {
+        state.menuIds.push(GM_registerMenuCommand('Quick export (.md)', () => exportChat({ format: 'md', action: 'download' })));
+      }
+    };
+
+    const setEnabled = async (value) => {
+      state.enabled = !!value;
+      await gmStore.set(ENABLE_KEY, state.enabled);
+      if (sharedUi) {
+        sharedUi.setScriptEnabled(SCRIPT_ID, state.enabled);
+      }
+      if (!state.enabled) {
+        await stop();
+      } else {
+        await start();
+      }
+      registerMenu();
+    };
+
+    const renderPanel = () => {
+      const wrapper = document.createElement('div');
+      wrapper.style.display = 'flex';
+      wrapper.style.flexDirection = 'column';
+      wrapper.style.gap = '10px';
+
+      const header = document.createElement('div');
+      header.textContent = 'Export ChatGPT conversation';
+      header.style.fontSize = '13px';
+      header.style.color = '#e5e7eb';
+      wrapper.appendChild(header);
+
+      const optionsRow = document.createElement('div');
+      optionsRow.style.display = 'flex';
+      optionsRow.style.flexDirection = 'column';
+      optionsRow.style.gap = '8px';
+      optionsRow.appendChild(buildToggle({
+        id: 'export-api-toggle',
+        label: 'Full export (API mode)',
+        checked: STATE.apiMode,
+        onChange: (checked) => { STATE.apiMode = checked; }
+      }));
+      optionsRow.appendChild(buildToggle({
+        id: 'export-citation-toggle',
+        label: 'Format citations as footnotes',
+        checked: STATE.citations,
+        onChange: (checked) => { STATE.citations = checked; }
+      }));
+      wrapper.appendChild(optionsRow);
+
+      const buttonGroup = document.createElement('div');
+      buttonGroup.style.display = 'flex';
+      buttonGroup.style.flexDirection = 'column';
+      buttonGroup.style.gap = '8px';
+      buttonGroup.appendChild(buildActionRow('Markdown (.md)', 'md'));
+      buttonGroup.appendChild(buildActionRow('Plain Text (.txt)', 'txt'));
+      buttonGroup.appendChild(buildActionRow('JSON (.json)', 'json'));
+      wrapper.appendChild(buttonGroup);
+
+      return wrapper;
+    };
+
+    if (sharedUi) {
+      sharedUi.registerScript({
+        id: SCRIPT_ID,
+        title: SCRIPT_TITLE,
+        enabled: state.enabled,
+        render: renderPanel,
+        onToggle: (next) => setEnabled(next)
+      });
     }
-  }
 
-  function btnStyle() {
-    return [
-      'padding: 8px 12px',
-      'font-size: 14px',
-      'border-radius: 6px',
-      'border: none',
-      'background: #10a37f',
-      'color: white',
-      'cursor: pointer',
-      'font-weight: bold'
-    ].join(';');
-  }
-
-  function showOptionsDialog() {
-    if (document.getElementById(POPUP_ID)) return;
-
-    const popup = document.createElement('div');
-    popup.id = POPUP_ID;
-    popup.dataset.chatgptExporter = '1';
-    popup.style.cssText = [
-      'position: fixed',
-      'bottom: 90px',
-      'left: 10%',
-      'right: 10%',
-      'background: #fff',
-      'border: 2px solid #10a37f',
-      'border-radius: 10px',
-      'padding: 15px',
-      'z-index: 9999',
-      'box-shadow: 0 4px 8px rgba(0,0,0,0.2)',
-      'font-size: 16px',
-      'text-align: center'
-    ].join(';');
-
-    const title = document.createElement('div');
-    title.textContent = '📤 Export Chat As';
-    title.style.cssText = 'margin-bottom: 12px; font-weight: bold;';
-
-    const optionsRow = document.createElement('div');
-    optionsRow.style.cssText = 'display:flex;flex-direction:column;gap:8px;align-items:flex-start;margin-bottom:12px;';
-
-    const apiToggle = buildToggle({
-      id: 'export-api-toggle',
-      label: 'Full export (API mode)',
-      checked: STATE.apiMode,
-      onChange: checked => {
-        STATE.apiMode = checked;
-      }
-    });
-
-    const citationToggle = buildToggle({
-      id: 'export-citation-toggle',
-      label: 'Format citations as footnotes',
-      checked: STATE.citations,
-      onChange: checked => {
-        STATE.citations = checked;
-      }
-    });
-
-    optionsRow.appendChild(apiToggle);
-    optionsRow.appendChild(citationToggle);
-
-    const buttonGroup = document.createElement('div');
-    buttonGroup.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
-
-    buttonGroup.appendChild(buildActionRow('Markdown (.md)', 'md'));
-    buttonGroup.appendChild(buildActionRow('Plain Text (.txt)', 'txt'));
-    buttonGroup.appendChild(buildActionRow('JSON (.json)', 'json'));
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.textContent = '❌ Cancel';
-    cancelBtn.style.cssText = `${btnStyle()};background:#ccc;color:#000;margin-top:12px;`;
-    cancelBtn.addEventListener('click', () => popup.remove());
-
-    popup.appendChild(title);
-    popup.appendChild(optionsRow);
-    popup.appendChild(buttonGroup);
-    popup.appendChild(cancelBtn);
-
-    document.body.appendChild(popup);
+    await setEnabled(state.enabled);
   }
 
   function buildToggle({ id, label, checked, onChange }) {
@@ -349,9 +357,180 @@
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = label;
-    btn.style.cssText = btnStyle();
+    btn.style.cssText = buttonStyle();
     btn.addEventListener('click', onClick);
     return btn;
+  }
+
+  function buttonStyle() {
+    return [
+      'padding: 8px 12px',
+      'font-size: 14px',
+      'border-radius: 6px',
+      'border: 1px solid rgba(255,255,255,0.15)',
+      'background: #1f2937',
+      'color: #f8fafc',
+      'cursor: pointer',
+      'font-weight: 600'
+    ].join(';');
+  }
+
+  function legacyButtonStyle() {
+    return [
+      'padding: 9px 13px',
+      'font-size: 13px',
+      'border-radius: 10px',
+      'border: 1px solid #ff70c6',
+      'background: linear-gradient(145deg,#0f0f17,#16162a)',
+      'color: #f8fafc',
+      'cursor: pointer',
+      'font-weight: 700',
+      'letter-spacing: 0.01em',
+      'box-shadow: 0 10px 22px rgba(0,0,0,0.45)'
+    ].join(';');
+  }
+
+  function findInputWrapper() {
+    return document.querySelector('form')?.parentElement || null;
+  }
+
+  function injectButtons(container) {
+    if (sharedUi) return; // shared UI handles controls
+    if (document.getElementById(BUTTONS_ID)) return;
+    const wrapper = document.createElement('div');
+    wrapper.id = BUTTONS_ID;
+    wrapper.dataset.chatgptExporter = '1';
+    wrapper.style.cssText =
+      'margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-start;z-index:9999;' +
+      'background:#0d1324;padding:10px;border:1px solid #ff69b4;border-radius:12px;box-shadow:0 14px 30px rgba(0,0,0,0.45);';
+
+    const quickBtn = document.createElement('button');
+    quickBtn.type = 'button';
+    quickBtn.innerText = '⬇️ Quick Export (.md)';
+    quickBtn.style.cssText = legacyButtonStyle();
+    quickBtn.addEventListener('click', () => {
+      void exportChat({ format: 'md', action: 'download' });
+    });
+
+    const moreBtn = document.createElement('button');
+    moreBtn.type = 'button';
+    moreBtn.innerText = '⚙️ More Options';
+    moreBtn.style.cssText = legacyButtonStyle();
+    moreBtn.addEventListener('click', showOptionsDialog);
+
+    wrapper.appendChild(quickBtn);
+    wrapper.appendChild(moreBtn);
+
+    if (container === document.body) {
+      container.insertBefore(wrapper, container.firstChild);
+    } else {
+      container.appendChild(wrapper);
+    }
+  }
+
+  function showOptionsDialog() {
+    if (sharedUi) {
+      sharedUi.switchPanel(SCRIPT_ID);
+      sharedUi.toggleModal();
+      return;
+    }
+    if (document.getElementById(POPUP_ID)) return;
+
+    const popup = document.createElement('div');
+    popup.id = POPUP_ID;
+    popup.dataset.chatgptExporter = '1';
+    popup.style.cssText = [
+      'position: fixed',
+      'bottom: 90px',
+      'left: 8%',
+      'right: 8%',
+      'background: linear-gradient(160deg,#0b0b12,#121226)',
+      'border: 1px solid #ff70c6',
+      'border-radius: 12px',
+      'padding: 16px',
+      'z-index: 9999',
+      'box-shadow: 0 16px 34px rgba(0,0,0,0.5)',
+      'font-size: 16px',
+      'text-align: center'
+    ].join(';');
+
+    const title = document.createElement('div');
+    title.textContent = '📤 Export Chat As';
+    title.style.cssText = 'margin-bottom: 12px; font-weight: 700; color:#f8fafc;';
+
+    const optionsRow = document.createElement('div');
+    optionsRow.style.cssText = 'display:flex;flex-direction:column;gap:8px;align-items:flex-start;margin-bottom:12px;color:#e5e7eb;';
+
+    const apiToggle = buildToggle({
+      id: 'export-api-toggle',
+      label: 'Full export (API mode)',
+      checked: STATE.apiMode,
+      onChange: checked => {
+        STATE.apiMode = checked;
+      }
+    });
+
+    const citationToggle = buildToggle({
+      id: 'export-citation-toggle',
+      label: 'Format citations as footnotes',
+      checked: STATE.citations,
+      onChange: checked => {
+        STATE.citations = checked;
+      }
+    });
+
+    optionsRow.appendChild(apiToggle);
+    optionsRow.appendChild(citationToggle);
+
+    const buttonGroup = document.createElement('div');
+    buttonGroup.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+
+    buttonGroup.appendChild(buildActionRow('Markdown (.md)', 'md'));
+    buttonGroup.appendChild(buildActionRow('Plain Text (.txt)', 'txt'));
+    buttonGroup.appendChild(buildActionRow('JSON (.json)', 'json'));
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = '❌ Cancel';
+    cancelBtn.style.cssText = `${legacyButtonStyle()};background:#1b2436;color:#f8fafc;margin-top:12px;`;
+
+    popup.appendChild(title);
+    popup.appendChild(optionsRow);
+    popup.appendChild(buttonGroup);
+    popup.appendChild(cancelBtn);
+
+    document.body.appendChild(popup);
+
+    let observer = null;
+    const cleanup = () => {
+      document.removeEventListener('keydown', escapeHandler);
+      if (observer) observer.disconnect();
+      observer = null;
+    };
+
+    const removePopup = () => {
+      if (popup.parentNode) {
+        popup.remove();
+      }
+      cleanup();
+    };
+
+    popup.addEventListener('click', (ev) => {
+      if (ev.target === popup) removePopup();
+    });
+    const escapeHandler = (e) => {
+      if (e.key === 'Escape') {
+        removePopup();
+      }
+    };
+    document.addEventListener('keydown', escapeHandler);
+    observer = new MutationObserver(() => {
+      if (!popup.isConnected) {
+        cleanup();
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    cancelBtn.addEventListener('click', () => removePopup());
   }
 
   async function exportChat({ format, action }) {
@@ -379,9 +558,6 @@
     } else if (action === 'share') {
       await shareContent(content, filename, mimeType);
     }
-
-    const popup = document.getElementById(POPUP_ID);
-    if (popup) popup.remove();
   }
 
   function buildExportFromDom(format, { enableCitations }) {
@@ -1130,9 +1306,7 @@
     }
   }
 
-  try {
-    main();
-  } catch (error) {
+  main().catch((error) => {
     log('error', 'fatal error', error);
-  }
+  });
 })();

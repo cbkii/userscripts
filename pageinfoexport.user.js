@@ -2,7 +2,7 @@
 // @name         Export Full Page Info (XBrowser)
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
-// @version      2025.12.24.0924
+// @version      2025.12.24.1700
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -18,9 +18,11 @@
 // @grant        GM_notification
 // @grant        GM_openInTab
 // @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // @grant        GM_setClipboard
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // ==/UserScript==
 
 /*
@@ -45,6 +47,29 @@
   const LOG_PREFIX = '[pginfo]';
   const LOG_STORAGE_KEY = 'userscript.logs.pageinfoexport';
   const LOG_MAX_ENTRIES = 200;
+  const SCRIPT_ID = 'pageinfoexport';
+  const SCRIPT_TITLE = 'Page Info Export';
+  const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+  const gmStore = {
+    async get(key, fallback) {
+      try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
+    },
+    async set(key, value) {
+      try { await GM_setValue(key, value); } catch (_) {}
+    }
+  };
+  const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
+    ? window.__userscriptSharedUi.getInstance({
+      get: (key, fallback) => gmStore.get(key, fallback),
+      set: (key, value) => gmStore.set(key, value)
+    })
+    : null;
+  const state = {
+    enabled: true,
+    started: false,
+    menuIds: []
+  };
+  const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
   const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
     let debugEnabled = !!debug;
@@ -1072,15 +1097,95 @@
     updateStatus(statusEl, 'Split download attempts completed.');
   }
 
-  function main() {
-    GMX.registerMenuCommand('Export page info…', () => {
-      renderDialog();
-    });
-  }
+  const renderPanel = () => {
+    const wrapper = document.createElement('div');
+    wrapper.style.display = 'flex';
+    wrapper.style.flexDirection = 'column';
+    wrapper.style.gap = '10px';
 
-  try {
-    main();
-  } catch (err) {
+    const text = document.createElement('p');
+    text.textContent = 'Export DOM, scripts, styles, and performance data. Results open the fallback UI if a download is blocked.';
+    text.style.margin = '0';
+    text.style.fontSize = '13px';
+    wrapper.appendChild(text);
+
+    const buttons = document.createElement('div');
+    buttons.style.display = 'flex';
+    buttons.style.flexWrap = 'wrap';
+    buttons.style.gap = '8px';
+
+    const exportBtn = document.createElement('button');
+    exportBtn.type = 'button';
+    exportBtn.textContent = 'Export page info';
+    exportBtn.style.padding = '8px 10px';
+    exportBtn.style.borderRadius = '8px';
+    exportBtn.style.border = '1px solid rgba(255,255,255,0.18)';
+    exportBtn.style.background = '#1f2937';
+    exportBtn.style.color = '#f8fafc';
+    exportBtn.addEventListener('click', () => renderDialog());
+
+    buttons.appendChild(exportBtn);
+    wrapper.appendChild(buttons);
+    return wrapper;
+  };
+
+  const registerMenu = () => {
+    if (typeof GM_registerMenuCommand !== 'function') return;
+    if (hasUnregister && state.menuIds.length) {
+      state.menuIds.forEach((id) => {
+        try { GM_unregisterMenuCommand(id); } catch (_) {}
+      });
+      state.menuIds = [];
+    }
+    if (!hasUnregister && state.menuIds.length) return;
+    state.menuIds.push(GM_registerMenuCommand(
+      `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+      async () => { await setEnabled(!state.enabled); }
+    ));
+    if (state.enabled) {
+      state.menuIds.push(GM_registerMenuCommand('Export page info…', () => renderDialog()));
+    }
+  };
+
+  const stop = async () => {
+    state.started = false;
+    removeOverlay();
+  };
+
+  const start = async () => {
+    if (state.started) return;
+    state.started = true;
+  };
+
+  const setEnabled = async (value) => {
+    state.enabled = !!value;
+    await gmStore.set(ENABLE_KEY, state.enabled);
+    if (sharedUi) {
+      sharedUi.setScriptEnabled(SCRIPT_ID, state.enabled);
+    }
+    if (!state.enabled) {
+      await stop();
+    } else {
+      await start();
+    }
+    registerMenu();
+  };
+
+  const init = async () => {
+    state.enabled = await gmStore.get(ENABLE_KEY, true);
+    if (sharedUi) {
+      sharedUi.registerScript({
+        id: SCRIPT_ID,
+        title: SCRIPT_TITLE,
+        enabled: state.enabled,
+        render: renderPanel,
+        onToggle: (next) => setEnabled(next)
+      });
+    }
+    await setEnabled(state.enabled);
+  };
+
+  init().catch((err) => {
     log('error', 'fatal error', err);
-  }
+  });
 })();

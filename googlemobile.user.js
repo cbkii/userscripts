@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii (mobile UI by Claude)
 // @description  Mobile Google search helper with filters, dorks, and a compact UI.
-// @version      2025.12.24.0055
+// @version      2025.12.24.1700
 // @require      https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
 // @require      https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js
 // @match        *://www.google.*/search*
@@ -27,6 +27,9 @@
 // @grant        GM_addStyle
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
+// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // @run-at       document-end
 // @noframes
 // ==/UserScript==
@@ -51,6 +54,29 @@
   const LOG_PREFIX = '[gsearch]';
   const LOG_STORAGE_KEY = 'userscript.logs.googlemobile';
   const LOG_MAX_ENTRIES = 200;
+  const SCRIPT_ID = 'googlemobile';
+  const SCRIPT_TITLE = 'Google Extra Search';
+  const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+  const gmStore = {
+    async get(key, fallback) {
+      try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
+    },
+    async set(key, value) {
+      try { await GM_setValue(key, value); } catch (_) {}
+    }
+  };
+  const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
+    ? window.__userscriptSharedUi.getInstance({
+      get: (key, fallback) => gmStore.get(key, fallback),
+      set: (key, value) => gmStore.set(key, value)
+    })
+    : null;
+  const state = {
+    enabled: true,
+    started: false,
+    menuIds: []
+  };
+  const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
   const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
     let debugEnabled = !!debug;
@@ -1614,9 +1640,106 @@ if (document.readyState === 'loading') {
 
   }
 
-  try {
+  const harvestPanel = () => {
+    const container = document.getElementById('google-expert-ui');
+    const panel = document.getElementById('google-expert-panel');
+    const overlay = document.getElementById('google-expert-overlay');
+    const fab = document.getElementById('google-expert-fab');
+    if (!panel) return null;
+    if (panel.parentNode) panel.parentNode.removeChild(panel);
+    if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    if (fab && fab.parentNode) fab.parentNode.removeChild(fab);
+    if (container && container.parentNode) container.parentNode.removeChild(container);
+    panel.style.position = 'static';
+    panel.style.boxShadow = 'none';
+    panel.style.maxHeight = 'unset';
+    panel.style.width = '100%';
+    return panel;
+  };
+
+  const renderPanel = () => {
+    if (!state.started && state.enabled) {
+      start();
+    }
+    const panel = harvestPanel();
+    if (panel) return panel;
+    const fallback = document.createElement('div');
+    fallback.textContent = 'Google search helper is initialising… toggle it on if needed.';
+    fallback.style.color = '#e5e7eb';
+    fallback.style.fontSize = '13px';
+    return fallback;
+  };
+
+  const registerMenu = () => {
+    if (typeof GM_registerMenuCommand !== 'function') return;
+    if (hasUnregister && state.menuIds.length) {
+      state.menuIds.forEach((id) => {
+        try { GM_unregisterMenuCommand(id); } catch (_) {}
+      });
+      state.menuIds = [];
+    }
+    if (!hasUnregister && state.menuIds.length) return;
+    state.menuIds.push(GM_registerMenuCommand(
+      `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+      async () => { await setEnabled(!state.enabled); }
+    ));
+    if (state.enabled) {
+      state.menuIds.push(GM_registerMenuCommand('Show Google search helper', () => {
+        if (sharedUi) {
+          sharedUi.switchPanel(SCRIPT_ID);
+          sharedUi.toggleModal();
+        }
+      }));
+    }
+  };
+
+  const stop = async () => {
+    state.started = false;
+    const container = document.getElementById('google-expert-ui');
+    if (container && container.parentNode) {
+      try { container.parentNode.removeChild(container); } catch (_) {}
+    }
+    const panel = document.getElementById('google-expert-panel');
+    if (panel && panel.parentNode) {
+      try { panel.parentNode.removeChild(panel); } catch (_) {}
+    }
+  };
+
+  const start = async () => {
+    if (state.started) return;
+    state.started = true;
     main();
-  } catch (err) {
+  };
+
+  const setEnabled = async (value) => {
+    state.enabled = !!value;
+    await gmStore.set(ENABLE_KEY, state.enabled);
+    if (sharedUi) {
+      sharedUi.setScriptEnabled(SCRIPT_ID, state.enabled);
+    }
+    if (!state.enabled) {
+      await stop();
+    } else if (!state.started) {
+      await start();
+    }
+    registerMenu();
+  };
+
+  const initToggle = async () => {
+    state.enabled = await gmStore.get(ENABLE_KEY, true);
+    if (sharedUi) {
+      sharedUi.registerScript({
+        id: SCRIPT_ID,
+        title: SCRIPT_TITLE,
+        enabled: state.enabled,
+        render: renderPanel,
+        onToggle: (next) => setEnabled(next)
+      });
+    }
+    await setEnabled(state.enabled);
+  };
+
+  initToggle().catch((err) => {
     log('error', 'fatal error', err);
-  }
+  });
 })();

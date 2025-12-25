@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Log Viewer
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.0055
+// @version      2025.12.24.1742
 // @description  View and clear stored userscript logs from a simple on-page dialog.
 // @author       cbkii
 // @match        *://*/*
@@ -17,16 +17,18 @@
 // @grant        GM_listValues
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
+// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // ==/UserScript==
 
 /*
   Feature summary:
-  - Shows a modal with stored userscript logs on demand.
+  - Shows stored userscript logs inside the shared userscript modal on demand.
   - Clears all stored userscript logs with one menu action.
 
   How it works:
   - Reads GM storage keys prefixed with "userscript.logs.".
-  - Renders a simple dialog with the latest stored entries.
+  - Renders a simple panel with the latest stored entries.
 
   Configuration:
   - Logs update only on refresh; reopen the dialog after reloading the page.
@@ -40,12 +42,33 @@
   const LOG_PREFIX_KEY = 'userscript.logs.';
   const LOG_STORAGE_KEY = 'userscript.logs.logview';
   const LOG_MAX_ENTRIES = 200;
+  const SCRIPT_ID = 'userscriptlogs';
+  const SCRIPT_TITLE = 'Log Viewer';
+  const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
   const UI_IDS = {
-    overlay: 'userscript-logs-overlay',
-    dialog: 'userscript-logs-dialog',
     body: 'userscript-logs-body',
   };
-  let escapeHandler = null;
+  const FALLBACK_OVERLAY_ID = 'userscript-logs-overlay';
+  const gmStore = {
+    async get(key, fallback) {
+      try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
+    },
+    async set(key, value) {
+      try { await GM_setValue(key, value); } catch (_) {}
+    }
+  };
+  const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
+    ? window.__userscriptSharedUi.getInstance({
+      get: (key, fallback) => gmStore.get(key, fallback),
+      set: (key, value) => gmStore.set(key, value)
+    })
+    : null;
+  const state = {
+    enabled: true,
+    started: false,
+    menuIds: []
+  };
+  const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
   const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
     let debugEnabled = !!debug;
@@ -190,35 +213,19 @@
   function ensureStyles() {
     if (document.getElementById('userscript-logs-style')) return;
     const css = `
-      #${UI_IDS.overlay} {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.55);
-        z-index: 2147483647;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      }
-      #${UI_IDS.dialog} {
-        width: min(780px, 94vw);
-        max-height: 88vh;
-        background: #0f172a;
-        color: #e2e8f0;
-        border-radius: 12px;
-        padding: 16px;
+      .userscript-logs-panel {
         display: flex;
         flex-direction: column;
-        gap: 12px;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+        gap: 10px;
+        color: #e2e8f0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       }
-      #${UI_IDS.dialog} h2 {
+      .userscript-logs-panel h2 {
         margin: 0;
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 600;
       }
       #${UI_IDS.body} {
-        flex: 1;
         background: #020617;
         border: 1px solid #1e293b;
         border-radius: 8px;
@@ -232,19 +239,23 @@
         display: flex;
         gap: 8px;
         justify-content: flex-end;
+        flex-wrap: wrap;
       }
       .userscript-logs-actions button {
         appearance: none;
-        border: 1px solid #334155;
-        background: #1e293b;
-        color: #e2e8f0;
-        padding: 6px 12px;
-        border-radius: 6px;
-        font-size: 12px;
+        border: 1px solid #ff70c6;
+        background: linear-gradient(145deg,#0f0f17,#151528);
+        color: #f8fafc;
+        padding: 7px 12px;
+        border-radius: 8px;
+        font-size: 12.5px;
+        font-weight: 700;
+        letter-spacing: 0.01em;
         cursor: pointer;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.45);
       }
       .userscript-logs-actions button:hover {
-        background: #334155;
+        background: linear-gradient(145deg,#11111c,#191933);
       }
     `;
     if (typeof GM_addStyle === 'function') {
@@ -262,15 +273,6 @@
     document.head.appendChild(style);
   }
 
-  function removeDialog() {
-    const overlay = document.getElementById(UI_IDS.overlay);
-    if (overlay) overlay.remove();
-    if (escapeHandler) {
-      document.removeEventListener('keydown', escapeHandler);
-      escapeHandler = null;
-    }
-  }
-
   async function clearLogs() {
     const keys = await getLogKeys();
     for (const key of keys) {
@@ -280,35 +282,29 @@
     }
   }
 
-  async function renderDialog() {
-    removeDialog();
+  const renderPanel = () => {
     ensureStyles();
-
-    const overlay = document.createElement('div');
-    overlay.id = UI_IDS.overlay;
-
-    const dialog = document.createElement('div');
-    dialog.id = UI_IDS.dialog;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'userscript-logs-panel';
 
     const title = document.createElement('h2');
     title.textContent = 'Userscript Logs (refresh page to update)';
+    wrapper.appendChild(title);
 
     const body = document.createElement('div');
     body.id = UI_IDS.body;
-    try {
-      const entries = await loadLogs();
-      body.textContent = formatLogs(entries);
-    } catch (err) {
-      log('error', 'failed to load logs', err);
-      body.textContent = 'Failed to load stored logs. Please try again.';
-    }
+    body.textContent = 'Loading logs...';
+    wrapper.appendChild(body);
 
     const actions = document.createElement('div');
     actions.className = 'userscript-logs-actions';
 
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = 'Close';
-    closeBtn.addEventListener('click', removeDialog);
+    const refreshBtn = document.createElement('button');
+    refreshBtn.textContent = 'Refresh';
+    refreshBtn.addEventListener('click', async () => {
+      const entries = await loadLogs();
+      body.textContent = formatLogs(entries);
+    });
 
     const clearBtn = document.createElement('button');
     clearBtn.textContent = 'Clear Logs';
@@ -317,27 +313,195 @@
       body.textContent = 'Logs cleared. Refresh the page to view new logs.';
     });
 
+    actions.appendChild(refreshBtn);
+    actions.appendChild(clearBtn);
+    wrapper.appendChild(actions);
+
+    loadLogs().then((entries) => {
+      body.textContent = formatLogs(entries);
+    }).catch((err) => {
+      log('error', 'failed to load logs', err);
+      body.textContent = 'Failed to load stored logs. Please try again.';
+    });
+
+    return wrapper;
+  };
+
+  const removeFallback = () => {
+    const overlay = document.getElementById(FALLBACK_OVERLAY_ID);
+    if (overlay && overlay.parentNode) {
+      try { overlay.parentNode.removeChild(overlay); } catch (_) {}
+    }
+  };
+
+  const renderFallbackModal = async () => {
+    ensureStyles();
+    removeFallback();
+    const overlay = document.createElement('div');
+    overlay.id = FALLBACK_OVERLAY_ID;
+    overlay.style.cssText = `
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at 20% 20%, rgba(255,105,180,0.08), transparent 36%), rgba(0, 0, 0, 0.6);
+      z-index: 2147483647;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    `;
+    const dialog = document.createElement('div');
+    dialog.style.cssText = `
+      width: min(780px, 94vw);
+      max-height: 88vh;
+      background: linear-gradient(165deg, #0d0d13, #151528);
+      color: #f8fafc;
+      border-radius: 14px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      border: 1px solid #ff70c6;
+    `;
+    const title = document.createElement('h2');
+    title.textContent = 'Userscript Logs (refresh page to update)';
+    title.style.margin = '0';
+    dialog.appendChild(title);
+
+    const body = document.createElement('div');
+    body.id = UI_IDS.body;
+    body.style.cssText = `
+      flex: 1;
+      background: #020617;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 12px;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+    `;
+    body.textContent = 'Loading logs...';
+    dialog.appendChild(body);
+
+    const actions = document.createElement('div');
+    actions.className = 'userscript-logs-actions';
+    actions.style.marginTop = '4px';
+
+    const refreshBtn = document.createElement('button');
+    refreshBtn.textContent = 'Refresh';
+    refreshBtn.addEventListener('click', async () => {
+      const entries = await loadLogs();
+      body.textContent = formatLogs(entries);
+    });
+
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = 'Clear Logs';
+    clearBtn.addEventListener('click', async () => {
+      await clearLogs();
+      body.textContent = 'Logs cleared. Refresh the page to view new logs.';
+    });
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.addEventListener('click', removeFallback);
+
+    actions.appendChild(refreshBtn);
     actions.appendChild(clearBtn);
     actions.appendChild(closeBtn);
-
-    dialog.appendChild(title);
-    dialog.appendChild(body);
     dialog.appendChild(actions);
+
     overlay.appendChild(dialog);
-    overlay.addEventListener('click', (event) => {
-      if (event.target === overlay) removeDialog();
+    overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) removeFallback();
     });
-    escapeHandler = (event) => {
-      if (event.key === 'Escape') removeDialog();
-    };
-    document.addEventListener('keydown', escapeHandler);
+    document.addEventListener('keydown', function escHandler(ev) {
+      if (ev.key === 'Escape') {
+        removeFallback();
+        document.removeEventListener('keydown', escHandler);
+      }
+    });
+
+    try {
+      const entries = await loadLogs();
+      body.textContent = formatLogs(entries);
+    } catch (err) {
+      log('error', 'failed to load logs', err);
+      body.textContent = 'Failed to load stored logs. Please try again.';
+    }
 
     document.body.appendChild(overlay);
-  }
+  };
 
-  try {
-    main();
-  } catch (err) {
+  const teardown = () => {
+    state.started = false;
+    removeFallback();
+  };
+
+  const start = async () => {
+    if (state.started) return;
+    state.started = true;
+    log('debug', 'log viewer ready');
+  };
+
+  const setEnabled = async (value) => {
+    state.enabled = value;
+    await gmStore.set(ENABLE_KEY, state.enabled);
+    if (sharedUi) {
+      sharedUi.setScriptEnabled(SCRIPT_ID, state.enabled);
+    }
+    if (!state.enabled) {
+      teardown();
+    } else {
+      await start();
+    }
+    registerMenu();
+  };
+
+  const registerMenu = () => {
+    if (typeof GM_registerMenuCommand !== 'function') return;
+    if (hasUnregister && state.menuIds.length) {
+      state.menuIds.forEach((id) => {
+        try { GM_unregisterMenuCommand(id); } catch (_) {}
+      });
+      state.menuIds = [];
+    }
+    state.menuIds.push(GM_registerMenuCommand(
+      `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+      async () => { await setEnabled(!state.enabled); }
+    ));
+    if (state.enabled) {
+      state.menuIds.push(GM_registerMenuCommand('Open log viewer', () => {
+        if (sharedUi) {
+          sharedUi.switchPanel(SCRIPT_ID);
+          sharedUi.toggleModal();
+        } else {
+          renderFallbackModal();
+        }
+      }));
+      state.menuIds.push(GM_registerMenuCommand('Clear stored logs', () => clearLogs()));
+    }
+  };
+
+  const init = async () => {
+    state.enabled = await gmStore.get(ENABLE_KEY, true);
+    if (sharedUi) {
+      sharedUi.registerScript({
+        id: SCRIPT_ID,
+        title: SCRIPT_TITLE,
+        enabled: state.enabled,
+        render: renderPanel,
+        onToggle: (next) => setEnabled(next)
+      });
+    }
+    if (state.enabled) {
+      await start();
+    }
+    registerMenu();
+  };
+
+  init().catch((err) => {
     log('error', 'fatal error', err);
-  }
+  });
 })();
