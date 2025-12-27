@@ -43,6 +43,10 @@
 (() => {
   'use strict';
 
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const DEBUG = false;
   const LOG_PREFIX = '[pagemd]';
   const LOG_STORAGE_KEY = 'userscript.logs.pagemd';
@@ -54,6 +58,10 @@
   const FALLBACK_BUTTON_TEXT = 'Page → Markdown';
   const DEFAULT_FILENAME = 'page.md';
   const POST_IDLE_DELAY_MS = 350;
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
 
   /**
    * Structured logger compatible with userscriptlogs.user.js storage.
@@ -145,6 +153,10 @@
   const logError = (msg, meta) => logger('error', msg, meta);
   const logDebug = (msg, meta) => logger('debug', msg, meta);
 
+  //////////////////////////////////////////////////////////////
+  // THIRD-PARTY LIBRARY CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   /**
    * Turndown setup with GitHub-flavored Markdown support and a few focused rules
    * to keep code fences and alt text intact.
@@ -215,6 +227,10 @@
       node.matches('[class*=\"code\" i],[class*=\"mono\" i],[class*=\"tt\" i]'),
     replacement: (content) => `\`${content}\``,
   });
+
+  //////////////////////////////////////////////////////////////
+  // CORE LOGIC - CONTENT EXTRACTION & MARKDOWN CONVERSION
+  //////////////////////////////////////////////////////////////
 
   /**
    * Helper utilities.
@@ -421,6 +437,10 @@
     return `${header}${markdownBody}${sourceLine}`;
   };
 
+  //////////////////////////////////////////////////////////////
+  // DOWNLOAD & FILE HANDLING
+  //////////////////////////////////////////////////////////////
+
   const gmDownloadLegacy = typeof GM_download === 'function' ? GM_download : null;
   const gmDownloadAsync = typeof GM !== 'undefined' && GM && typeof GM.download === 'function'
     ? GM.download.bind(GM)
@@ -604,6 +624,10 @@
     }
   };
 
+  //////////////////////////////////////////////////////////////
+  // UI COMPONENTS
+  //////////////////////////////////////////////////////////////
+
   const TOAST_STYLES = `
     #pagemd-toast {
       position: fixed;
@@ -721,6 +745,10 @@
     return wrapper;
   };
 
+  //////////////////////////////////////////////////////////////
+  // STATE MANAGEMENT
+  //////////////////////////////////////////////////////////////
+
   const teardown = () => {
     state.started = false;
     const toast = document.getElementById('pagemd-toast');
@@ -805,6 +833,10 @@
       document.addEventListener('DOMContentLoaded', append, { once: true });
     }
   };
+
+  //////////////////////////////////////////////////////////////
+  // INITIALIZATION
+  //////////////////////////////////////////////////////////////
 
   const init = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
