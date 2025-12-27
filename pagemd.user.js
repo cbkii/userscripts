@@ -19,8 +19,8 @@
 // @grant        GM_setValue
 // @grant        GM_download
 // @require      https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/Readability.js
-// @require      https://cdnjs.cloudflare.com/ajax/libs/turndown/7.1.2/turndown.min.js
-// @require      https://unpkg.com/turndown-plugin-gfm@1.0.2/dist/turndown-plugin-gfm.js
+// @require      https://cdn.jsdelivr.net/npm/turndown@7.2.2/lib/turndown.browser.cjs.min.js
+// @require      https://cdn.jsdelivr.net/npm/turndown-plugin-gfm@1.0.2/dist/turndown-plugin-gfm.min.js
 // @license      AGPL-3.0
 // ==/UserScript==
 
