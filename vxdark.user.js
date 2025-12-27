@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Router Contrast Dark Mode
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.1700
+// @version      2025.12.27.1519
 // @description  High-contrast dark mode for the VX230V router UI.
 // @match        http://192.168.1.1/*
 // @match        https://192.168.1.1/*
@@ -16,7 +16,6 @@
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_unregisterMenuCommand
-// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // ==/UserScript==
 
 /*
