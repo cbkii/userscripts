@@ -39,6 +39,10 @@
 (() => {
   'use strict';
 
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const DEBUG = false;
   const LOG_PREFIX = '[cgpt]';
   const BUTTONS_ID = 'exporter-buttons';
@@ -50,6 +54,20 @@
   const SCRIPT_ID = 'chatgptmd';
   const SCRIPT_TITLE = 'ChatGPT Exporter';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+  const LOG_STORAGE_KEY = 'userscript.logs.chatgptmd';
+  const LOG_MAX_ENTRIES = 200;
+  const gmDownloadLegacy = typeof GM_download === 'function' ? GM_download : null;
+  const gmDownloadAsync = typeof GM !== 'undefined' && GM && typeof GM.download === 'function'
+    ? GM.download.bind(GM)
+    : null;
+  const DOWNLOAD_ANCHOR_DELAY_MS = 500;
+  const BLOB_STALE_MS = 10000;
+  const BLOB_REVOKE_MS = 120000;
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
+
   const gmStore = {
     async get(key, fallback) {
       try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
@@ -72,16 +90,6 @@
     historyPatched: false
   };
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
-
-  const LOG_STORAGE_KEY = 'userscript.logs.chatgptmd';
-  const LOG_MAX_ENTRIES = 200;
-  const gmDownloadLegacy = typeof GM_download === 'function' ? GM_download : null;
-  const gmDownloadAsync = typeof GM !== 'undefined' && GM && typeof GM.download === 'function'
-    ? GM.download.bind(GM)
-    : null;
-  const DOWNLOAD_ANCHOR_DELAY_MS = 500;
-  const BLOB_STALE_MS = 10000;
-  const BLOB_REVOKE_MS = 120000;
 
   const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
     let debugEnabled = !!debug;
