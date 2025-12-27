@@ -33,6 +33,10 @@
 (function () {
   'use strict';
 
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const DEBUG = false;
   const LOG_PREFIX = '[vxdark]';
   const LOG_STORAGE_KEY = 'userscript.logs.vxdark';
@@ -40,6 +44,11 @@
   const SCRIPT_ID = 'vxdark';
   const SCRIPT_TITLE = 'VX Router Dark Mode';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
+
   const gmStore = {
     async get(key, fallback) {
       try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
@@ -146,6 +155,10 @@
     maxEntries: LOG_MAX_ENTRIES,
     debug: DEBUG
   });
+
+  //////////////////////////////////////////////////////////////
+  // CORE LOGIC - DARK MODE STYLING
+  //////////////////////////////////////////////////////////////
 
   async function main() {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
@@ -316,6 +329,10 @@
       window.addEventListener('beforeunload', state.unloadHandler);
     };
 
+    //////////////////////////////////////////////////////////////
+    // STATE MANAGEMENT
+    //////////////////////////////////////////////////////////////
+
     const stop = async () => {
       if (!state.started) return;
       state.started = false;
@@ -362,6 +379,10 @@
       registerMenu();
     };
 
+    //////////////////////////////////////////////////////////////
+    // UI COMPONENTS
+    //////////////////////////////////////////////////////////////
+
     const renderPanel = () => {
       const wrapper = document.createElement('div');
       wrapper.style.display = 'flex';
@@ -386,6 +407,10 @@
 
       return wrapper;
     };
+
+    //////////////////////////////////////////////////////////////
+    // INITIALIZATION
+    //////////////////////////////////////////////////////////////
 
     if (sharedUi) {
       sharedUi.registerScript({

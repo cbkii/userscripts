@@ -36,6 +36,10 @@
 (() => {
   'use strict';
 
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const DEBUG = false;
   const LOG_PREFIX = '[logview]';
   const LOG_PREFIX_KEY = 'userscript.logs.';
@@ -48,6 +52,11 @@
     body: 'userscript-logs-body',
   };
   const FALLBACK_OVERLAY_ID = 'userscript-logs-overlay';
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
+
   const gmStore = {
     async get(key, fallback) {
       try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
@@ -141,6 +150,10 @@
     debug: DEBUG
   });
 
+  //////////////////////////////////////////////////////////////
+  // CORE LOGIC - LOG MANAGEMENT
+  //////////////////////////////////////////////////////////////
+
   function main() {
     GM_registerMenuCommand('View userscript logs', () => {
       renderDialog().catch((err) => log('error', 'render dialog failed', err));
@@ -208,6 +221,10 @@
       return `[${entry.ts}] [${entry.level}] [${entry.script}] ${entry.message}${meta}`;
     }).join('\n');
   }
+
+  //////////////////////////////////////////////////////////////
+  // UI COMPONENTS
+  //////////////////////////////////////////////////////////////
 
   function ensureStyles() {
     if (document.getElementById('userscript-logs-style')) return;
@@ -438,6 +455,10 @@
     removeFallback();
   };
 
+  //////////////////////////////////////////////////////////////
+  // STATE MANAGEMENT
+  //////////////////////////////////////////////////////////////
+
   const start = async () => {
     if (state.started) return;
     state.started = true;
@@ -482,6 +503,10 @@
       state.menuIds.push(GM_registerMenuCommand('Clear stored logs', () => clearLogs()));
     }
   };
+
+  //////////////////////////////////////////////////////////////
+  // INITIALIZATION
+  //////////////////////////////////////////////////////////////
 
   const init = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
