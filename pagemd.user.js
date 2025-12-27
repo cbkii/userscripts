@@ -762,7 +762,7 @@
       `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
       async () => { await setEnabled(!state.enabled); }
     ));
-    if (state.enabled) {
+    if (state.enabled && !sharedUi) {
       state.menuIds.push(GM_registerMenuCommand('Convert Page to Markdown', () => handleConvert({ aggressiveClutter: true })));
       state.menuIds.push(GM_registerMenuCommand('Convert (no cleanup)', () => handleConvert({ aggressiveClutter: false })));
     }

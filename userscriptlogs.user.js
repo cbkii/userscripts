@@ -470,7 +470,7 @@
       `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
       async () => { await setEnabled(!state.enabled); }
     ));
-    if (state.enabled) {
+    if (state.enabled && !sharedUi) {
       state.menuIds.push(GM_registerMenuCommand('Open log viewer', () => {
         if (sharedUi) {
           sharedUi.switchPanel(SCRIPT_ID);

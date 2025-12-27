@@ -1141,7 +1141,7 @@
       `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
       async () => { await setEnabled(!state.enabled); }
     ));
-    if (state.enabled) {
+    if (state.enabled && !sharedUi) {
       state.menuIds.push(GM_registerMenuCommand('Export page info…', () => renderDialog()));
     }
   };

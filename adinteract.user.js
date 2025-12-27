@@ -577,7 +577,7 @@ bootstrap().catch((err) => {
             `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
             async () => { await setEnabled(!state.enabled); }
         ));
-        if (state.enabled) {
+        if (state.enabled && !sharedUi) {
             state.menuIds.push(GM_registerMenuCommand('Force run ad unlocker', () => main()));
         }
     };
