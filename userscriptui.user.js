@@ -533,4 +533,12 @@
       }
     };
   })();
+
+  // Dispatch custom event to notify other scripts that shared UI is ready
+  setTimeout(() => {
+    const event = new CustomEvent('userscriptSharedUiReady', {
+      detail: { sharedUi: root.__userscriptSharedUi }
+    });
+    document.dispatchEvent(event);
+  }, 0);
 })(typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);

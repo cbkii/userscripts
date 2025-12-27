@@ -516,10 +516,19 @@
 
   
   //////////////////////////////////////////////////////////////
-  // CORE LOGIC - PAGE UNLOCKING
+
+
+  
+  // INITIALIZATION
+
+
+  
   //////////////////////////////////////////////////////////////
 
-// --- Bootstrap ---
+
+
+  
+  // --- Bootstrap ---
   ensureStyleLast();
   clearTopLevelDom0Handlers();
 

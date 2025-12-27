@@ -73,12 +73,72 @@
       try { await GM_setValue(key, value); } catch (_) {}
     }
   };
-  const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
-    ? window.__userscriptSharedUi.getInstance({
-      get: (key, fallback) => gmStore.get(key, fallback),
-      set: (key, value) => gmStore.set(key, value)
-    })
-    : null;
+  // Event-based shared UI detection to prevent race conditions
+
+  let sharedUi = null;
+
+  let sharedUiReady = false;
+
+
+  const initSharedUi = () => {
+
+    if (typeof window !== 'undefined' && window.__userscriptSharedUi) {
+
+      sharedUi = window.__userscriptSharedUi.getInstance({
+
+        get: (key, fallback) => gmStore.get(key, fallback),
+
+        set: (key, value) => gmStore.set(key, value)
+
+      });
+
+      sharedUiReady = true;
+
+      return true;
+
+    }
+
+    return false;
+
+  };
+
+
+  // Try immediate detection
+
+  initSharedUi();
+
+
+  // Listen for shared UI ready event
+
+  document.addEventListener('userscriptSharedUiReady', () => {
+
+    if (!sharedUiReady) {
+
+      initSharedUi();
+
+      // Re-register if needed after shared UI becomes available
+
+      if (sharedUi && state.enabled) {
+
+        sharedUi.registerScript({
+
+          id: SCRIPT_ID,
+
+          title: SCRIPT_TITLE,
+
+          enabled: state.enabled,
+
+          render: renderPanel,
+
+          onToggle: (next) => setEnabled(next)
+
+        });
+
+      }
+
+    }
+
+  });
   const state = {
     enabled: true,
     started: false,
@@ -1703,11 +1763,16 @@ if (document.readyState === 'loading') {
       `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
       async () => { await setEnabled(!state.enabled); }
     ));
-    if (state.enabled && !sharedUi) {
+    if (state.enabled) {
       state.menuIds.push(GM_registerMenuCommand('Show Google search helper', () => {
         if (sharedUi) {
           sharedUi.switchPanel(SCRIPT_ID);
           sharedUi.toggleModal();
+        } else {
+          // Fallback: ensure the native UI is visible
+          if (!state.started) {
+            start();
+          }
         }
       }));
     }
