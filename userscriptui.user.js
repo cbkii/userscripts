@@ -536,9 +536,27 @@
 
   // Dispatch custom event to notify other scripts that shared UI is ready
   setTimeout(() => {
-    const event = new CustomEvent('userscriptSharedUiReady', {
-      detail: { sharedUi: root.__userscriptSharedUi }
-    });
+    if (typeof document === 'undefined') return;
+
+    let event;
+    try {
+      if (typeof CustomEvent === 'function') {
+        event = new CustomEvent('userscriptSharedUiReady', {
+          detail: { sharedUi: root.__userscriptSharedUi }
+        });
+      } else {
+        event = document.createEvent('CustomEvent');
+        event.initCustomEvent(
+          'userscriptSharedUiReady',
+          false,
+          false,
+          { sharedUi: root.__userscriptSharedUi }
+        );
+      }
+    } catch (_) {
+      return;
+    }
+
     document.dispatchEvent(event);
   }, 0);
 })(typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
