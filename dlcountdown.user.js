@@ -38,6 +38,10 @@
 (function() {
     'use strict';
 
+    //////////////////////////////////////////////////////////////
+    // CONSTANTS & CONFIGURATION
+    //////////////////////////////////////////////////////////////
+
     const DEBUG = false;
     const LOG_PREFIX = '[dlcnt]';
     const LOG_STORAGE_KEY = 'userscript.logs.dlcountdown';
@@ -45,6 +49,11 @@
     const SCRIPT_ID = 'dlcountdown';
     const SCRIPT_TITLE = 'Download Timer Accelerator';
     const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+
+    //////////////////////////////////////////////////////////////
+    // UTILITIES & HELPERS
+    //////////////////////////////////////////////////////////////
+
     const gmStore = {
         async get(key, fallback) {
             try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
@@ -151,6 +160,10 @@
         maxEntries: LOG_MAX_ENTRIES,
         debug: DEBUG
     });
+
+    //////////////////////////////////////////////////////////////
+    // CORE LOGIC - TIMER ACCELERATION
+    //////////////////////////////////////////////////////////////
 
     async function main() {
 
@@ -715,6 +728,10 @@
         log('info', 'Toggle: Ctrl+Alt+T or userscript menu');
     };
 
+    //////////////////////////////////////////////////////////////
+    // STATE MANAGEMENT
+    //////////////////////////////////////////////////////////////
+
     const registerMenu = () => {
         if (typeof GM_registerMenuCommand !== 'function') return;
         if (hasUnregister && state.menuIds.length) {
@@ -761,6 +778,10 @@
         }
         registerMenu();
     };
+
+    //////////////////////////////////////////////////////////////
+    // UI COMPONENTS
+    //////////////////////////////////////////////////////////////
 
     const renderPanel = () => {
         const wrapper = doc.createElement('div');
@@ -810,6 +831,10 @@
         wrapper.appendChild(buttons);
         return wrapper;
     };
+
+    //////////////////////////////////////////////////////////////
+    // INITIALIZATION
+    //////////////////////////////////////////////////////////////
 
     if (sharedUi) {
         sharedUi.registerScript({

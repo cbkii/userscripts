@@ -42,6 +42,10 @@
 (() => {
   'use strict';
 
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const DEBUG = false;
   const LOG_PREFIX = '[pginfo]';
   const LOG_STORAGE_KEY = 'userscript.logs.pageinfoexport';
@@ -49,6 +53,11 @@
   const SCRIPT_ID = 'pageinfoexport';
   const SCRIPT_TITLE = 'Page Info Export';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
+
   const gmStore = {
     async get(key, fallback) {
       try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
@@ -145,6 +154,10 @@
     log.setDebug = (value) => { debugEnabled = !!value; };
     return log;
   };
+
+  //////////////////////////////////////////////////////////////
+  // CORE LOGIC - PAGE INFO CAPTURE & EXPORT
+  //////////////////////////////////////////////////////////////
 
   const DEFAULT_OPTIONS = {
     mode: 'full',
@@ -395,6 +408,10 @@
       revokeDelayMs: DEFAULT_OPTIONS.revokeDelayMs,
     };
   }
+
+  //////////////////////////////////////////////////////////////
+  // UI COMPONENTS
+  //////////////////////////////////////////////////////////////
 
   function renderDialog() {
     ensureStyles();
@@ -1128,6 +1145,10 @@
     return wrapper;
   };
 
+  //////////////////////////////////////////////////////////////
+  // STATE MANAGEMENT
+  //////////////////////////////////////////////////////////////
+
   const registerMenu = () => {
     if (typeof GM_registerMenuCommand !== 'function') return;
     if (hasUnregister && state.menuIds.length) {
@@ -1169,6 +1190,10 @@
     }
     registerMenu();
   };
+
+  //////////////////////////////////////////////////////////////
+  // INITIALIZATION
+  //////////////////////////////////////////////////////////////
 
   const init = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);

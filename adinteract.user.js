@@ -41,6 +41,10 @@
 (function() {
     'use strict';
 
+    //////////////////////////////////////////////////////////////
+    // CONSTANTS & CONFIGURATION
+    //////////////////////////////////////////////////////////////
+
     const DEBUG = false;
     const LOG_PREFIX = '[adint]';
     const LOG_STORAGE_KEY = 'userscript.logs.adinteract';
@@ -49,6 +53,11 @@
     const SCRIPT_ID = 'adinteract';
     const SCRIPT_TITLE = 'Ad Interaction Unlock';
     const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+
+    //////////////////////////////////////////////////////////////
+    // UTILITIES & HELPERS
+    //////////////////////////////////////////////////////////////
+
     const gmStore = {
         async get(key, fallback) {
             try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
@@ -152,6 +161,10 @@
         maxEntries: LOG_MAX_ENTRIES,
         debug: DEBUG
     });
+
+    //////////////////////////////////////////////////////////////
+    // CORE LOGIC - AD INTERACTION GATE UNLOCKING
+    //////////////////////////////////////////////////////////////
 
     function main() {
 
@@ -534,6 +547,10 @@ bootstrap().catch((err) => {
     }
     }
 
+    //////////////////////////////////////////////////////////////
+    // UI COMPONENTS
+    //////////////////////////////////////////////////////////////
+
     const renderPanel = () => {
         const wrapper = document.createElement('div');
         wrapper.style.display = 'flex';
@@ -563,6 +580,10 @@ bootstrap().catch((err) => {
         wrapper.appendChild(runBtn);
         return wrapper;
     };
+
+    //////////////////////////////////////////////////////////////
+    // STATE MANAGEMENT
+    //////////////////////////////////////////////////////////////
 
     const registerMenu = () => {
         if (typeof GM_registerMenuCommand !== 'function') return;
@@ -605,6 +626,10 @@ bootstrap().catch((err) => {
         }
         registerMenu();
     };
+
+    //////////////////////////////////////////////////////////////
+    // INITIALIZATION
+    //////////////////////////////////////////////////////////////
 
     const init = async () => {
         state.enabled = await gmStore.get(ENABLE_KEY, true);
