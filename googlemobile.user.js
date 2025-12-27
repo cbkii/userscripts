@@ -108,36 +108,25 @@
   initSharedUi();
 
 
-  // Listen for shared UI ready event
-
+  // Listen for shared UI ready event - deferred to ensure all variables are initialized
   document.addEventListener('userscriptSharedUiReady', () => {
-
-    if (!sharedUiReady) {
-
-      initSharedUi();
-
-      // Re-register if needed after shared UI becomes available
-
-      if (sharedUi && state.enabled) {
-
-        sharedUi.registerScript({
-
-          id: SCRIPT_ID,
-
-          title: SCRIPT_TITLE,
-
-          enabled: state.enabled,
-
-          render: renderPanel,
-
-          onToggle: (next) => setEnabled(next)
-
-        });
-
+    setTimeout(() => {
+      if (!sharedUiReady) {
+        initSharedUi();
       }
-
-    }
-
+      // Re-register if needed after shared UI becomes available
+      // Guard: ensure required variables are initialized
+      if (sharedUi && typeof state !== 'undefined' && state.enabled && 
+          typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+        sharedUi.registerScript({
+          id: SCRIPT_ID,
+          title: SCRIPT_TITLE,
+          enabled: state.enabled,
+          render: renderPanel,
+          onToggle: (next) => setEnabled(next)
+        });
+      }
+    }, 0);
   });
   const state = {
     enabled: true,
