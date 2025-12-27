@@ -174,6 +174,10 @@
     debug: DEBUG
   });
 
+  //////////////////////////////////////////////////////////////
+  // CORE LOGIC - CHATGPT EXPORT
+  //////////////////////////////////////////////////////////////
+
   async function main() {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
 
@@ -235,6 +239,10 @@
       teardownLegacyUi();
     };
 
+    //////////////////////////////////////////////////////////////
+    // STATE MANAGEMENT
+    //////////////////////////////////////////////////////////////
+
     const registerMenu = () => {
       if (typeof GM_registerMenuCommand !== 'function') return;
       if (hasUnregister && state.menuIds.length) {
@@ -265,6 +273,10 @@
       }
       registerMenu();
     };
+
+    //////////////////////////////////////////////////////////////
+    // UI COMPONENTS
+    //////////////////////////////////////////////////////////////
 
     const renderPanel = () => {
       const wrapper = document.createElement('div');
@@ -1312,6 +1324,10 @@
       return false;
     }
   }
+
+  //////////////////////////////////////////////////////////////
+  // INITIALIZATION
+  //////////////////////////////////////////////////////////////
 
   main().catch((error) => {
     log('error', 'fatal error', error);

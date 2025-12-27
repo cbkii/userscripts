@@ -47,6 +47,10 @@
 (() => {
   'use strict';
 
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const LOG_PREFIX = '[aab]';
   const LOG_STORAGE_KEY = 'userscript.logs.antiadblock';
   const LOG_MAX_ENTRIES = 200;
@@ -54,6 +58,11 @@
   const SCRIPT_ID = 'antiadblock';
   const SCRIPT_TITLE = 'Anti-AdBlock Neutralizer';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
+
   const gmStore = {
     async get(key, fallback) {
       try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
@@ -158,6 +167,10 @@
     debug: DEBUG
   });
   const dbg = (...args) => log('debug', ...args);
+
+  //////////////////////////////////////////////////////////////
+  // CORE LOGIC - ANTI-ADBLOCK DETECTION & NEUTRALIZATION
+  //////////////////////////////////////////////////////////////
 
   function main() {
 
@@ -463,6 +476,11 @@
   /* ------------------------------------------------------------------
      UI: floating button + configuration panel
   ------------------------------------------------------------------ */
+
+  //////////////////////////////////////////////////////////////
+  // UI COMPONENTS
+  //////////////////////////////////////////////////////////////
+
   function addStyles() {
     if (typeof GM_addStyle !== 'function') return;
     GM_addStyle(`
@@ -1490,6 +1508,10 @@
 
   }
 
+  //////////////////////////////////////////////////////////////
+  // STATE MANAGEMENT
+  //////////////////////////////////////////////////////////////
+
   const renderPanel = () => {
     const wrapper = document.createElement('div');
     wrapper.style.display = 'flex';
@@ -1559,6 +1581,10 @@
     }
     registerMenu();
   };
+
+  //////////////////////////////////////////////////////////////
+  // INITIALIZATION
+  //////////////////////////////////////////////////////////////
 
   const init = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);

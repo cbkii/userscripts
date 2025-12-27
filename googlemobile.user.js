@@ -49,6 +49,10 @@
 (() => {
   'use strict';
 
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const DEBUG = false;
   const LOG_PREFIX = '[gsearch]';
   const LOG_STORAGE_KEY = 'userscript.logs.googlemobile';
@@ -56,6 +60,11 @@
   const SCRIPT_ID = 'googlemobile';
   const SCRIPT_TITLE = 'Google Extra Search';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
+
   const gmStore = {
     async get(key, fallback) {
       try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
@@ -159,6 +168,10 @@
     maxEntries: LOG_MAX_ENTRIES,
     debug: DEBUG
   });
+
+  //////////////////////////////////////////////////////////////
+  // CORE LOGIC - GOOGLE SEARCH ENHANCEMENTS
+  //////////////////////////////////////////////////////////////
 
   function main() {
 
@@ -1656,6 +1669,10 @@ if (document.readyState === 'loading') {
     return panel;
   };
 
+  //////////////////////////////////////////////////////////////
+  // UI COMPONENTS
+  //////////////////////////////////////////////////////////////
+
   const renderPanel = () => {
     if (!state.started && state.enabled) {
       start();
@@ -1668,6 +1685,10 @@ if (document.readyState === 'loading') {
     fallback.style.fontSize = '13px';
     return fallback;
   };
+
+  //////////////////////////////////////////////////////////////
+  // STATE MANAGEMENT
+  //////////////////////////////////////////////////////////////
 
   const registerMenu = () => {
     if (typeof GM_registerMenuCommand !== 'function') return;
@@ -1723,6 +1744,10 @@ if (document.readyState === 'loading') {
     }
     registerMenu();
   };
+
+  //////////////////////////////////////////////////////////////
+  // INITIALIZATION
+  //////////////////////////////////////////////////////////////
 
   const initToggle = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
