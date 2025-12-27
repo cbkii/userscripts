@@ -40,6 +40,10 @@
     return;
   }
 
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const SAFE_DOC = document;
   const STORAGE_KEY_POSITION = 'userscripts.sharedUi.position';
   const STORAGE_KEY_ACTIVE = 'userscripts.sharedUi.activePanel';
@@ -48,6 +52,10 @@
   const BUTTON_ID = 'userscripts-shared-button';
   const TABLIST_ID = 'userscripts-shared-tabs';
   const PANEL_ID = 'userscripts-shared-panel';
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
 
   const isTouch = () => 'ontouchstart' in SAFE_DOC.documentElement;
   const clickEvent = isTouch() ? 'touchstart' : 'click';
@@ -199,6 +207,10 @@
     }
   `;
 
+  //////////////////////////////////////////////////////////////
+  // UI COMPONENTS
+  //////////////////////////////////////////////////////////////
+
   let styleInjected = false;
   const injectStyle = () => {
     if (styleInjected || SAFE_DOC.getElementById(`${BUTTON_ID}-style`)) {
@@ -240,6 +252,10 @@
       }
     }
   });
+
+  //////////////////////////////////////////////////////////////
+  // STATE MANAGEMENT
+  //////////////////////////////////////////////////////////////
 
   const createUi = (storageAdapterRef) => {
     injectStyle();
@@ -497,6 +513,10 @@
       get position() { return state.position; }
     };
   };
+
+  //////////////////////////////////////////////////////////////
+  // INITIALIZATION
+  //////////////////////////////////////////////////////////////
 
   root.__userscriptSharedUi = (() => {
     const adapterRef = { current: null };

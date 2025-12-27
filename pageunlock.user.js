@@ -18,6 +18,11 @@
 (function () {
   'use strict';
 
+
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const STORAGE_KEY = 'pageUnlock:cfg';
   const STYLE_ID = 'pageUnlock-style';
   const PATCH_FLAG = '__pageUnlockPatched__';
@@ -35,6 +40,11 @@
     disabledHosts: [],          // per-host disable list
     hotkey: { alt: true, shift: true, code: 'KeyU' }, // Alt+Shift+U
   };
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
+
 
   // --- GM helpers (sync in XBrowser; sync in TM legacy API) ---
   function gmGet(key, def) {
@@ -504,7 +514,12 @@
     }, true);
   }
 
-  // --- Bootstrap ---
+  
+  //////////////////////////////////////////////////////////////
+  // CORE LOGIC - PAGE UNLOCKING
+  //////////////////////////////////////////////////////////////
+
+// --- Bootstrap ---
   ensureStyleLast();
   clearTopLevelDom0Handlers();
 
