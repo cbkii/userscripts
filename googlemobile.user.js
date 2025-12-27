@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii (mobile UI by Claude)
 // @description  Mobile Google search helper with filters, dorks, and a compact UI.
-// @version      2025.12.24.1700
+// @version      2025.12.27.1519
 // @require      https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
 // @require      https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js
 // @match        *://www.google.*/search*
@@ -29,7 +29,6 @@
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_unregisterMenuCommand
-// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // @run-at       document-end
 // @noframes
 // ==/UserScript==
@@ -50,6 +49,10 @@
 (() => {
   'use strict';
 
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const DEBUG = false;
   const LOG_PREFIX = '[gsearch]';
   const LOG_STORAGE_KEY = 'userscript.logs.googlemobile';
@@ -57,6 +60,11 @@
   const SCRIPT_ID = 'googlemobile';
   const SCRIPT_TITLE = 'Google Extra Search';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
+
   const gmStore = {
     async get(key, fallback) {
       try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
@@ -65,12 +73,61 @@
       try { await GM_setValue(key, value); } catch (_) {}
     }
   };
-  const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
-    ? window.__userscriptSharedUi.getInstance({
-      get: (key, fallback) => gmStore.get(key, fallback),
-      set: (key, value) => gmStore.set(key, value)
-    })
-    : null;
+  // Event-based shared UI detection to prevent race conditions
+
+  let sharedUi = null;
+
+  let sharedUiReady = false;
+
+
+  const initSharedUi = () => {
+
+    if (typeof window !== 'undefined' && window.__userscriptSharedUi) {
+
+      sharedUi = window.__userscriptSharedUi.getInstance({
+
+        get: (key, fallback) => gmStore.get(key, fallback),
+
+        set: (key, value) => gmStore.set(key, value)
+
+      });
+
+      sharedUiReady = true;
+
+      return true;
+
+    }
+
+    return false;
+
+  };
+
+
+  // Try immediate detection
+
+  initSharedUi();
+
+
+  // Listen for shared UI ready event - deferred to ensure all variables are initialized
+  document.addEventListener('userscriptSharedUiReady', () => {
+    setTimeout(() => {
+      if (!sharedUiReady) {
+        initSharedUi();
+      }
+      // Re-register if needed after shared UI becomes available
+      // Guard: ensure required variables are initialized
+      if (sharedUi && typeof state !== 'undefined' && state.enabled && 
+          typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+        sharedUi.registerScript({
+          id: SCRIPT_ID,
+          title: SCRIPT_TITLE,
+          enabled: state.enabled,
+          render: renderPanel,
+          onToggle: (next) => setEnabled(next)
+        });
+      }
+    }, 0);
+  });
   const state = {
     enabled: true,
     started: false,
@@ -160,6 +217,10 @@
     maxEntries: LOG_MAX_ENTRIES,
     debug: DEBUG
   });
+
+  //////////////////////////////////////////////////////////////
+  // CORE LOGIC - GOOGLE SEARCH ENHANCEMENTS
+  //////////////////////////////////////////////////////////////
 
   function main() {
 
@@ -1657,6 +1718,10 @@ if (document.readyState === 'loading') {
     return panel;
   };
 
+  //////////////////////////////////////////////////////////////
+  // UI COMPONENTS
+  //////////////////////////////////////////////////////////////
+
   const renderPanel = () => {
     if (!state.started && state.enabled) {
       start();
@@ -1669,6 +1734,10 @@ if (document.readyState === 'loading') {
     fallback.style.fontSize = '13px';
     return fallback;
   };
+
+  //////////////////////////////////////////////////////////////
+  // STATE MANAGEMENT
+  //////////////////////////////////////////////////////////////
 
   const registerMenu = () => {
     if (typeof GM_registerMenuCommand !== 'function') return;
@@ -1688,6 +1757,11 @@ if (document.readyState === 'loading') {
         if (sharedUi) {
           sharedUi.switchPanel(SCRIPT_ID);
           sharedUi.toggleModal();
+        } else {
+          // Fallback: ensure the native UI is visible
+          if (!state.started) {
+            start();
+          }
         }
       }));
     }
@@ -1724,6 +1798,10 @@ if (document.readyState === 'loading') {
     }
     registerMenu();
   };
+
+  //////////////////////////////////////////////////////////////
+  // INITIALIZATION
+  //////////////////////////////////////////////////////////////
 
   const initToggle = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);

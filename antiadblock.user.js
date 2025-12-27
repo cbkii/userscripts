@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.1700
+// @version      2025.12.27.1519
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @match        *://*/*
@@ -27,7 +27,6 @@
 // @grant        GM_xmlhttpRequest
 // @connect      easylist-downloads.adblockplus.org
 // @connect      raw.githubusercontent.com
-// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // ==/UserScript==
 
 /*
@@ -48,6 +47,10 @@
 (() => {
   'use strict';
 
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const LOG_PREFIX = '[aab]';
   const LOG_STORAGE_KEY = 'userscript.logs.antiadblock';
   const LOG_MAX_ENTRIES = 200;
@@ -55,6 +58,11 @@
   const SCRIPT_ID = 'antiadblock';
   const SCRIPT_TITLE = 'Anti-AdBlock Neutralizer';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
+
   const gmStore = {
     async get(key, fallback) {
       try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
@@ -63,12 +71,61 @@
       try { await GM_setValue(key, value); } catch (_) {}
     }
   };
-  const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
-    ? window.__userscriptSharedUi.getInstance({
-      get: (key, fallback) => gmStore.get(key, fallback),
-      set: (key, value) => gmStore.set(key, value)
-    })
-    : null;
+  // Event-based shared UI detection to prevent race conditions
+
+  let sharedUi = null;
+
+  let sharedUiReady = false;
+
+
+  const initSharedUi = () => {
+
+    if (typeof window !== 'undefined' && window.__userscriptSharedUi) {
+
+      sharedUi = window.__userscriptSharedUi.getInstance({
+
+        get: (key, fallback) => gmStore.get(key, fallback),
+
+        set: (key, value) => gmStore.set(key, value)
+
+      });
+
+      sharedUiReady = true;
+
+      return true;
+
+    }
+
+    return false;
+
+  };
+
+
+  // Try immediate detection
+
+  initSharedUi();
+
+
+  // Listen for shared UI ready event - deferred to ensure all variables are initialized
+  document.addEventListener('userscriptSharedUiReady', () => {
+    setTimeout(() => {
+      if (!sharedUiReady) {
+        initSharedUi();
+      }
+      // Re-register if needed after shared UI becomes available
+      // Guard: ensure required variables are initialized
+      if (sharedUi && typeof state !== 'undefined' && state.enabled && 
+          typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+        sharedUi.registerScript({
+          id: SCRIPT_ID,
+          title: SCRIPT_TITLE,
+          enabled: state.enabled,
+          render: renderPanel,
+          onToggle: (next) => setEnabled(next)
+        });
+      }
+    }, 0);
+  });
   const state = {
     enabled: true,
     started: false,
@@ -159,6 +216,10 @@
     debug: DEBUG
   });
   const dbg = (...args) => log('debug', ...args);
+
+  //////////////////////////////////////////////////////////////
+  // CORE LOGIC - ANTI-ADBLOCK DETECTION & NEUTRALIZATION
+  //////////////////////////////////////////////////////////////
 
   function main() {
 
@@ -464,6 +525,11 @@
   /* ------------------------------------------------------------------
      UI: floating button + configuration panel
   ------------------------------------------------------------------ */
+
+  //////////////////////////////////////////////////////////////
+  // UI COMPONENTS
+  //////////////////////////////////////////////////////////////
+
   function addStyles() {
     if (typeof GM_addStyle !== 'function') return;
     GM_addStyle(`
@@ -1491,6 +1557,10 @@
 
   }
 
+  //////////////////////////////////////////////////////////////
+  // STATE MANAGEMENT
+  //////////////////////////////////////////////////////////////
+
   const renderPanel = () => {
     const wrapper = document.createElement('div');
     wrapper.style.display = 'flex';
@@ -1560,6 +1630,10 @@
     }
     registerMenu();
   };
+
+  //////////////////////////////////////////////////////////////
+  // INITIALIZATION
+  //////////////////////////////////////////////////////////////
 
   const init = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);

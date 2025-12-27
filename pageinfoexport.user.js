@@ -2,7 +2,7 @@
 // @name         Export Full Page Info (XBrowser)
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
-// @version      2025.12.24.1700
+// @version      2025.12.27.1519
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -22,7 +22,6 @@
 // @grant        GM_setClipboard
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // ==/UserScript==
 
 /*
@@ -43,6 +42,10 @@
 (() => {
   'use strict';
 
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const DEBUG = false;
   const LOG_PREFIX = '[pginfo]';
   const LOG_STORAGE_KEY = 'userscript.logs.pageinfoexport';
@@ -50,6 +53,11 @@
   const SCRIPT_ID = 'pageinfoexport';
   const SCRIPT_TITLE = 'Page Info Export';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
+
   const gmStore = {
     async get(key, fallback) {
       try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
@@ -58,12 +66,61 @@
       try { await GM_setValue(key, value); } catch (_) {}
     }
   };
-  const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
-    ? window.__userscriptSharedUi.getInstance({
-      get: (key, fallback) => gmStore.get(key, fallback),
-      set: (key, value) => gmStore.set(key, value)
-    })
-    : null;
+  // Event-based shared UI detection to prevent race conditions
+
+  let sharedUi = null;
+
+  let sharedUiReady = false;
+
+
+  const initSharedUi = () => {
+
+    if (typeof window !== 'undefined' && window.__userscriptSharedUi) {
+
+      sharedUi = window.__userscriptSharedUi.getInstance({
+
+        get: (key, fallback) => gmStore.get(key, fallback),
+
+        set: (key, value) => gmStore.set(key, value)
+
+      });
+
+      sharedUiReady = true;
+
+      return true;
+
+    }
+
+    return false;
+
+  };
+
+
+  // Try immediate detection
+
+  initSharedUi();
+
+
+  // Listen for shared UI ready event - deferred to ensure all variables are initialized
+  document.addEventListener('userscriptSharedUiReady', () => {
+    setTimeout(() => {
+      if (!sharedUiReady) {
+        initSharedUi();
+      }
+      // Re-register if needed after shared UI becomes available
+      // Guard: ensure required variables are initialized
+      if (sharedUi && typeof state !== 'undefined' && state.enabled && 
+          typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+        sharedUi.registerScript({
+          id: SCRIPT_ID,
+          title: SCRIPT_TITLE,
+          enabled: state.enabled,
+          render: renderPanel,
+          onToggle: (next) => setEnabled(next)
+        });
+      }
+    }, 0);
+  });
   const state = {
     enabled: true,
     started: false,
@@ -146,6 +203,10 @@
     log.setDebug = (value) => { debugEnabled = !!value; };
     return log;
   };
+
+  //////////////////////////////////////////////////////////////
+  // CORE LOGIC - PAGE INFO CAPTURE & EXPORT
+  //////////////////////////////////////////////////////////////
 
   const DEFAULT_OPTIONS = {
     mode: 'full',
@@ -396,6 +457,10 @@
       revokeDelayMs: DEFAULT_OPTIONS.revokeDelayMs,
     };
   }
+
+  //////////////////////////////////////////////////////////////
+  // UI COMPONENTS
+  //////////////////////////////////////////////////////////////
 
   function renderDialog() {
     ensureStyles();
@@ -1129,6 +1194,10 @@
     return wrapper;
   };
 
+  //////////////////////////////////////////////////////////////
+  // STATE MANAGEMENT
+  //////////////////////////////////////////////////////////////
+
   const registerMenu = () => {
     if (typeof GM_registerMenuCommand !== 'function') return;
     if (hasUnregister && state.menuIds.length) {
@@ -1170,6 +1239,10 @@
     }
     registerMenu();
   };
+
+  //////////////////////////////////////////////////////////////
+  // INITIALIZATION
+  //////////////////////////////////////////////////////////////
 
   const init = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.1742
+// @version      2025.12.27.1519
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @match        *://*/*
@@ -18,10 +18,9 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_download
-// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // @require      https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/Readability.js
-// @require      https://cdnjs.cloudflare.com/ajax/libs/turndown/7.1.2/turndown.min.js
-// @require      https://cdnjs.cloudflare.com/ajax/libs/turndown-plugin-gfm/1.0.2/turndown-plugin-gfm.min.js
+// @require      https://cdn.jsdelivr.net/npm/turndown@7.2.2/lib/turndown.browser.cjs.min.js
+// @require      https://cdn.jsdelivr.net/npm/turndown-plugin-gfm@1.0.2/dist/turndown-plugin-gfm.min.js
 // @license      AGPL-3.0
 // ==/UserScript==
 
@@ -44,6 +43,10 @@
 (() => {
   'use strict';
 
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const DEBUG = false;
   const LOG_PREFIX = '[pagemd]';
   const LOG_STORAGE_KEY = 'userscript.logs.pagemd';
@@ -55,6 +58,10 @@
   const FALLBACK_BUTTON_TEXT = 'Page → Markdown';
   const DEFAULT_FILENAME = 'page.md';
   const POST_IDLE_DELAY_MS = 350;
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
 
   /**
    * Structured logger compatible with userscriptlogs.user.js storage.
@@ -146,6 +153,10 @@
   const logError = (msg, meta) => logger('error', msg, meta);
   const logDebug = (msg, meta) => logger('debug', msg, meta);
 
+  //////////////////////////////////////////////////////////////
+  // THIRD-PARTY LIBRARY CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   /**
    * Turndown setup with GitHub-flavored Markdown support and a few focused rules
    * to keep code fences and alt text intact.
@@ -216,6 +227,10 @@
       node.matches('[class*=\"code\" i],[class*=\"mono\" i],[class*=\"tt\" i]'),
     replacement: (content) => `\`${content}\``,
   });
+
+  //////////////////////////////////////////////////////////////
+  // CORE LOGIC - CONTENT EXTRACTION & MARKDOWN CONVERSION
+  //////////////////////////////////////////////////////////////
 
   /**
    * Helper utilities.
@@ -422,6 +437,10 @@
     return `${header}${markdownBody}${sourceLine}`;
   };
 
+  //////////////////////////////////////////////////////////////
+  // DOWNLOAD & FILE HANDLING
+  //////////////////////////////////////////////////////////////
+
   const gmDownloadLegacy = typeof GM_download === 'function' ? GM_download : null;
   const gmDownloadAsync = typeof GM !== 'undefined' && GM && typeof GM.download === 'function'
     ? GM.download.bind(GM)
@@ -605,6 +624,10 @@
     }
   };
 
+  //////////////////////////////////////////////////////////////
+  // UI COMPONENTS
+  //////////////////////////////////////////////////////////////
+
   const TOAST_STYLES = `
     #pagemd-toast {
       position: fixed;
@@ -630,12 +653,45 @@
     }
   };
 
-  const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
-    ? window.__userscriptSharedUi.getInstance({
-      get: (key, fallback) => gmStore.get(key, fallback),
-      set: (key, value) => gmStore.set(key, value)
-    })
-    : null;
+  // Event-based shared UI detection to prevent race conditions
+  let sharedUi = null;
+  let sharedUiReady = false;
+
+  const initSharedUi = () => {
+    if (typeof window !== 'undefined' && window.__userscriptSharedUi) {
+      sharedUi = window.__userscriptSharedUi.getInstance({
+        get: (key, fallback) => gmStore.get(key, fallback),
+        set: (key, value) => gmStore.set(key, value)
+      });
+      sharedUiReady = true;
+      return true;
+    }
+    return false;
+  };
+
+  // Try immediate detection
+  initSharedUi();
+
+  // Listen for shared UI ready event - deferred to ensure all variables are initialized
+  document.addEventListener('userscriptSharedUiReady', () => {
+    setTimeout(() => {
+      if (!sharedUiReady) {
+        initSharedUi();
+      }
+      // Re-register if needed after shared UI becomes available
+      // Guard: ensure required variables are initialized
+      if (sharedUi && typeof state !== 'undefined' && state.enabled && 
+          typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+        sharedUi.registerScript({
+          id: SCRIPT_ID,
+          title: SCRIPT_TITLE,
+          enabled: state.enabled,
+          render: renderPanel,
+          onToggle: (next) => setEnabled(next)
+        });
+      }
+    }, 0);
+  });
 
   const state = {
     enabled: true,
@@ -722,6 +778,10 @@
     return wrapper;
   };
 
+  //////////////////////////////////////////////////////////////
+  // STATE MANAGEMENT
+  //////////////////////////////////////////////////////////////
+
   const teardown = () => {
     state.started = false;
     const toast = document.getElementById('pagemd-toast');
@@ -806,6 +866,10 @@
       document.addEventListener('DOMContentLoaded', append, { once: true });
     }
   };
+
+  //////////////////////////////////////////////////////////////
+  // INITIALIZATION
+  //////////////////////////////////////////////////////////////
 
   const init = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);

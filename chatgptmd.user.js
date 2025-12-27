@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.1742
+// @version      2025.12.27.1519
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions.
 // @author       cbcoz
 // @match        *://chat.openai.com/*
@@ -18,7 +18,6 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_download
-// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // ==/UserScript==
 
 /*
@@ -40,6 +39,10 @@
 (() => {
   'use strict';
 
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const DEBUG = false;
   const LOG_PREFIX = '[cgpt]';
   const BUTTONS_ID = 'exporter-buttons';
@@ -51,29 +54,6 @@
   const SCRIPT_ID = 'chatgptmd';
   const SCRIPT_TITLE = 'ChatGPT Exporter';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
-  const gmStore = {
-    async get(key, fallback) {
-      try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
-    },
-    async set(key, value) {
-      try { await GM_setValue(key, value); } catch (_) {}
-    }
-  };
-  const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
-    ? window.__userscriptSharedUi.getInstance({
-      get: (key, fallback) => gmStore.get(key, fallback),
-      set: (key, value) => gmStore.set(key, value)
-    })
-    : null;
-  const state = {
-    enabled: true,
-    started: false,
-    menuIds: [],
-    observers: [],
-    historyPatched: false
-  };
-  const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
-
   const LOG_STORAGE_KEY = 'userscript.logs.chatgptmd';
   const LOG_MAX_ENTRIES = 200;
   const gmDownloadLegacy = typeof GM_download === 'function' ? GM_download : null;
@@ -83,6 +63,82 @@
   const DOWNLOAD_ANCHOR_DELAY_MS = 500;
   const BLOB_STALE_MS = 10000;
   const BLOB_REVOKE_MS = 120000;
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
+
+  const gmStore = {
+    async get(key, fallback) {
+      try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
+    },
+    async set(key, value) {
+      try { await GM_setValue(key, value); } catch (_) {}
+    }
+  };
+  // Event-based shared UI detection to prevent race conditions
+
+  let sharedUi = null;
+
+  let sharedUiReady = false;
+
+
+  const initSharedUi = () => {
+
+    if (typeof window !== 'undefined' && window.__userscriptSharedUi) {
+
+      sharedUi = window.__userscriptSharedUi.getInstance({
+
+        get: (key, fallback) => gmStore.get(key, fallback),
+
+        set: (key, value) => gmStore.set(key, value)
+
+      });
+
+      sharedUiReady = true;
+
+      return true;
+
+    }
+
+    return false;
+
+  };
+
+
+  // Try immediate detection
+
+  initSharedUi();
+
+
+  // Listen for shared UI ready event - deferred to ensure all variables are initialized
+  document.addEventListener('userscriptSharedUiReady', () => {
+    setTimeout(() => {
+      if (!sharedUiReady) {
+        initSharedUi();
+      }
+      // Re-register if needed after shared UI becomes available
+      // Guard: ensure required variables are initialized
+      if (sharedUi && typeof state !== 'undefined' && state.enabled && 
+          typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+        sharedUi.registerScript({
+          id: SCRIPT_ID,
+          title: SCRIPT_TITLE,
+          enabled: state.enabled,
+          render: renderPanel,
+          onToggle: (next) => setEnabled(next)
+        });
+      }
+    }, 0);
+  });
+  const state = {
+    enabled: true,
+    started: false,
+    menuIds: [],
+    observers: [],
+    historyPatched: false
+  };
+  const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
   const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
     let debugEnabled = !!debug;
@@ -167,6 +223,10 @@
     debug: DEBUG
   });
 
+  //////////////////////////////////////////////////////////////
+  // CORE LOGIC - CHATGPT EXPORT
+  //////////////////////////////////////////////////////////////
+
   async function main() {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
 
@@ -228,6 +288,10 @@
       teardownLegacyUi();
     };
 
+    //////////////////////////////////////////////////////////////
+    // STATE MANAGEMENT
+    //////////////////////////////////////////////////////////////
+
     const registerMenu = () => {
       if (typeof GM_registerMenuCommand !== 'function') return;
       if (hasUnregister && state.menuIds.length) {
@@ -258,6 +322,10 @@
       }
       registerMenu();
     };
+
+    //////////////////////////////////////////////////////////////
+    // UI COMPONENTS
+    //////////////////////////////////////////////////////////////
 
     const renderPanel = () => {
       const wrapper = document.createElement('div');
@@ -1305,6 +1373,10 @@
       return false;
     }
   }
+
+  //////////////////////////////////////////////////////////////
+  // INITIALIZATION
+  //////////////////////////////////////////////////////////////
 
   main().catch((error) => {
     log('error', 'fatal error', error);

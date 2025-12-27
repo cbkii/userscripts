@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ad Interaction Gate Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.1700
+// @version      2025.12.27.1519
 // @description  Unlocks ad interaction gates after repeated clicks with optional auto-actions.
 // @author       cbkii
 // @match        *://*/*
@@ -20,7 +20,6 @@
 // @grant        GM_unregisterMenuCommand
 // @connect      easylist-downloads.adblockplus.org
 // @connect      raw.githubusercontent.com
-// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // ==/UserScript==
 
 /*
@@ -42,6 +41,10 @@
 (function() {
     'use strict';
 
+    //////////////////////////////////////////////////////////////
+    // CONSTANTS & CONFIGURATION
+    //////////////////////////////////////////////////////////////
+
     const DEBUG = false;
     const LOG_PREFIX = '[adint]';
     const LOG_STORAGE_KEY = 'userscript.logs.adinteract';
@@ -50,6 +53,11 @@
     const SCRIPT_ID = 'adinteract';
     const SCRIPT_TITLE = 'Ad Interaction Unlock';
     const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+
+    //////////////////////////////////////////////////////////////
+    // UTILITIES & HELPERS
+    //////////////////////////////////////////////////////////////
+
     const gmStore = {
         async get(key, fallback) {
             try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
@@ -58,12 +66,61 @@
             try { await GM_setValue(key, value); } catch (_) {}
         }
     };
-    const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
-        ? window.__userscriptSharedUi.getInstance({
-            get: (key, fallback) => gmStore.get(key, fallback),
-            set: (key, value) => gmStore.set(key, value)
-        })
-        : null;
+    // Event-based shared UI detection to prevent race conditions
+
+    let sharedUi = null;
+
+    let sharedUiReady = false;
+
+
+    const initSharedUi = () => {
+
+      if (typeof window !== 'undefined' && window.__userscriptSharedUi) {
+
+        sharedUi = window.__userscriptSharedUi.getInstance({
+
+          get: (key, fallback) => gmStore.get(key, fallback),
+
+          set: (key, value) => gmStore.set(key, value)
+
+        });
+
+        sharedUiReady = true;
+
+        return true;
+
+      }
+
+      return false;
+
+    };
+
+
+    // Try immediate detection
+
+    initSharedUi();
+
+
+    // Listen for shared UI ready event - deferred to ensure all variables are initialized
+    document.addEventListener('userscriptSharedUiReady', () => {
+      setTimeout(() => {
+        if (!sharedUiReady) {
+          initSharedUi();
+        }
+        // Re-register if needed after shared UI becomes available
+        // Guard: ensure required variables are initialized
+        if (sharedUi && typeof state !== 'undefined' && state.enabled && 
+            typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+          sharedUi.registerScript({
+            id: SCRIPT_ID,
+            title: SCRIPT_TITLE,
+            enabled: state.enabled,
+            render: renderPanel,
+            onToggle: (next) => setEnabled(next)
+          });
+        }
+      }, 0);
+    });
     const state = {
         enabled: true,
         started: false,
@@ -153,6 +210,10 @@
         maxEntries: LOG_MAX_ENTRIES,
         debug: DEBUG
     });
+
+    //////////////////////////////////////////////////////////////
+    // CORE LOGIC - AD INTERACTION GATE UNLOCKING
+    //////////////////////////////////////////////////////////////
 
     function main() {
 
@@ -535,6 +596,10 @@ bootstrap().catch((err) => {
     }
     }
 
+    //////////////////////////////////////////////////////////////
+    // UI COMPONENTS
+    //////////////////////////////////////////////////////////////
+
     const renderPanel = () => {
         const wrapper = document.createElement('div');
         wrapper.style.display = 'flex';
@@ -564,6 +629,10 @@ bootstrap().catch((err) => {
         wrapper.appendChild(runBtn);
         return wrapper;
     };
+
+    //////////////////////////////////////////////////////////////
+    // STATE MANAGEMENT
+    //////////////////////////////////////////////////////////////
 
     const registerMenu = () => {
         if (typeof GM_registerMenuCommand !== 'function') return;
@@ -606,6 +675,10 @@ bootstrap().catch((err) => {
         }
         registerMenu();
     };
+
+    //////////////////////////////////////////////////////////////
+    // INITIALIZATION
+    //////////////////////////////////////////////////////////////
 
     const init = async () => {
         state.enabled = await gmStore.get(ENABLE_KEY, true);

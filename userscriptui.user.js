@@ -40,6 +40,10 @@
     return;
   }
 
+  //////////////////////////////////////////////////////////////
+  // CONSTANTS & CONFIGURATION
+  //////////////////////////////////////////////////////////////
+
   const SAFE_DOC = document;
   const STORAGE_KEY_POSITION = 'userscripts.sharedUi.position';
   const STORAGE_KEY_ACTIVE = 'userscripts.sharedUi.activePanel';
@@ -48,6 +52,10 @@
   const BUTTON_ID = 'userscripts-shared-button';
   const TABLIST_ID = 'userscripts-shared-tabs';
   const PANEL_ID = 'userscripts-shared-panel';
+
+  //////////////////////////////////////////////////////////////
+  // UTILITIES & HELPERS
+  //////////////////////////////////////////////////////////////
 
   const isTouch = () => 'ontouchstart' in SAFE_DOC.documentElement;
   const clickEvent = isTouch() ? 'touchstart' : 'click';
@@ -199,6 +207,10 @@
     }
   `;
 
+  //////////////////////////////////////////////////////////////
+  // UI COMPONENTS
+  //////////////////////////////////////////////////////////////
+
   let styleInjected = false;
   const injectStyle = () => {
     if (styleInjected || SAFE_DOC.getElementById(`${BUTTON_ID}-style`)) {
@@ -240,6 +252,10 @@
       }
     }
   });
+
+  //////////////////////////////////////////////////////////////
+  // STATE MANAGEMENT
+  //////////////////////////////////////////////////////////////
 
   const createUi = (storageAdapterRef) => {
     injectStyle();
@@ -498,6 +514,10 @@
     };
   };
 
+  //////////////////////////////////////////////////////////////
+  // INITIALIZATION
+  //////////////////////////////////////////////////////////////
+
   root.__userscriptSharedUi = (() => {
     const adapterRef = { current: null };
     let instance = null;
@@ -513,4 +533,30 @@
       }
     };
   })();
+
+  // Dispatch custom event to notify other scripts that shared UI is ready
+  setTimeout(() => {
+    if (typeof document === 'undefined') return;
+
+    let event;
+    try {
+      if (typeof CustomEvent === 'function') {
+        event = new CustomEvent('userscriptSharedUiReady', {
+          detail: { sharedUi: root.__userscriptSharedUi }
+        });
+      } else {
+        event = document.createEvent('CustomEvent');
+        event.initCustomEvent(
+          'userscriptSharedUiReady',
+          false,
+          false,
+          { sharedUi: root.__userscriptSharedUi }
+        );
+      }
+    } catch (_) {
+      return;
+    }
+
+    document.dispatchEvent(event);
+  }, 0);
 })(typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);

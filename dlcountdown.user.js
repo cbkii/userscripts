@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.1700
+// @version      2025.12.27.1519
 // @description  Accelerates download countdown timers and enables download controls.
 // @author       cbkii
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:up|down|load|dl|mirror|drain|transfer)[a-z0-9-]*|[a-z0-9-]*(?:up|down|load|dl|mirror|drain|transfer))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
@@ -16,7 +16,6 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
@@ -39,6 +38,10 @@
 (function() {
     'use strict';
 
+    //////////////////////////////////////////////////////////////
+    // CONSTANTS & CONFIGURATION
+    //////////////////////////////////////////////////////////////
+
     const DEBUG = false;
     const LOG_PREFIX = '[dlcnt]';
     const LOG_STORAGE_KEY = 'userscript.logs.dlcountdown';
@@ -46,6 +49,11 @@
     const SCRIPT_ID = 'dlcountdown';
     const SCRIPT_TITLE = 'Download Timer Accelerator';
     const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+
+    //////////////////////////////////////////////////////////////
+    // UTILITIES & HELPERS
+    //////////////////////////////////////////////////////////////
+
     const gmStore = {
         async get(key, fallback) {
             try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
@@ -54,12 +62,61 @@
             try { await GM_setValue(key, value); } catch (_) {}
         }
     };
-    const sharedUi = (typeof window !== 'undefined' && window.__userscriptSharedUi)
-        ? window.__userscriptSharedUi.getInstance({
-            get: (key, fallback) => gmStore.get(key, fallback),
-            set: (key, value) => gmStore.set(key, value)
-        })
-        : null;
+    // Event-based shared UI detection to prevent race conditions
+
+    let sharedUi = null;
+
+    let sharedUiReady = false;
+
+
+    const initSharedUi = () => {
+
+      if (typeof window !== 'undefined' && window.__userscriptSharedUi) {
+
+        sharedUi = window.__userscriptSharedUi.getInstance({
+
+          get: (key, fallback) => gmStore.get(key, fallback),
+
+          set: (key, value) => gmStore.set(key, value)
+
+        });
+
+        sharedUiReady = true;
+
+        return true;
+
+      }
+
+      return false;
+
+    };
+
+
+    // Try immediate detection
+
+    initSharedUi();
+
+
+    // Listen for shared UI ready event - deferred to ensure all variables are initialized
+    document.addEventListener('userscriptSharedUiReady', () => {
+      setTimeout(() => {
+        if (!sharedUiReady) {
+          initSharedUi();
+        }
+        // Re-register if needed after shared UI becomes available
+        // Guard: ensure required variables are initialized
+        if (sharedUi && typeof state !== 'undefined' && state.enabled && 
+            typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+          sharedUi.registerScript({
+            id: SCRIPT_ID,
+            title: SCRIPT_TITLE,
+            enabled: state.enabled,
+            render: renderPanel,
+            onToggle: (next) => setEnabled(next)
+          });
+        }
+      }, 0);
+    });
     const state = {
         enabled: true,
         started: false,
@@ -152,6 +209,10 @@
         maxEntries: LOG_MAX_ENTRIES,
         debug: DEBUG
     });
+
+    //////////////////////////////////////////////////////////////
+    // CORE LOGIC - TIMER ACCELERATION
+    //////////////////////////////////////////////////////////////
 
     async function main() {
 
@@ -716,6 +777,10 @@
         log('info', 'Toggle: Ctrl+Alt+T or userscript menu');
     };
 
+    //////////////////////////////////////////////////////////////
+    // STATE MANAGEMENT
+    //////////////////////////////////////////////////////////////
+
     const registerMenu = () => {
         if (typeof GM_registerMenuCommand !== 'function') return;
         if (hasUnregister && state.menuIds.length) {
@@ -762,6 +827,10 @@
         }
         registerMenu();
     };
+
+    //////////////////////////////////////////////////////////////
+    // UI COMPONENTS
+    //////////////////////////////////////////////////////////////
 
     const renderPanel = () => {
         const wrapper = doc.createElement('div');
@@ -811,6 +880,10 @@
         wrapper.appendChild(buttons);
         return wrapper;
     };
+
+    //////////////////////////////////////////////////////////////
+    // INITIALIZATION
+    //////////////////////////////////////////////////////////////
 
     if (sharedUi) {
         sharedUi.registerScript({

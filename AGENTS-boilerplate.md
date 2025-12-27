@@ -109,9 +109,10 @@ This is the **canonical scaffold** for all userscripts in this repo. Apply it to
 
 ## Shared UI manager (`userscriptui.user.js`)
 
-- Always `@require` the shared UI; register via `registerScript({ id, title, enabled, render, onToggle })`.
+- **Do NOT `@require` the shared UI** - it must be installed separately as a userscript. Scripts detect it via `window.__userscriptSharedUi`.
+- Register via `registerScript({ id, title, enabled, render, onToggle })` when `sharedUi` is available.
 - Shared UI is a scaffold only; **each script must remain fully functional without it** (fallback buttons/overlays + menu commands).
-- Fallbacks: if the shared UI fails to load, inject the legacy UI (floating button/panel) with **the same dark + hotpink styling** and keep menu commands working.
+- Fallbacks: if the shared UI is not present, inject the legacy UI (floating button/panel) with **the same dark + hotpink styling** and keep menu commands working.
 - UI content must be touch-friendly, dark-themed, and idempotent; remove injected nodes on teardown.
 
 ## Userscript logs (`userscriptlogs.user.js`)
@@ -128,6 +129,56 @@ This is the **canonical scaffold** for all userscripts in this repo. Apply it to
 - Use a capped logger writing to `LOG_STORAGE_KEY` (200 entries); prefer the existing scrubber pattern in scripts.
 - Observe idempotency: guard DOM injection with IDs/data-attributes; disconnect observers/timers on disable.
 - Avoid global side effects when disabled; re-run safely after SPA navigation.
+
+## Code structure and section banners
+
+### Standard section order
+
+All userscripts must organize code in this order, with consistent section banners:
+
+1. **CONSTANTS & CONFIGURATION** — Script IDs, storage keys, feature flags, numeric constants
+2. **UTILITIES & HELPERS** — Logger, storage wrappers, generic helper functions
+3. **CORE LOGIC** — Main business logic, algorithms, extraction/processing/transformation
+4. **UI COMPONENTS** — renderPanel, fallback UI, toast/notification builders
+5. **STATE MANAGEMENT** — setEnabled, registerMenu, start, stop, teardown
+6. **INITIALIZATION** — init function and its invocation
+
+Additional sections may be added between or after these when necessary for complex scripts (e.g., "THIRD-PARTY LIBRARY CONFIGURATION", "NETWORK & API", "EVENT HANDLERS"), but the core six must appear in this order when present.
+
+### Section banner format
+
+Every distinct section must have a banner comment. Use this exact format:
+
+```
+//////////////////////////////////////////////////////////////
+// SECTION NAME CONCISE DESCRIPTIVE SINGLE LINE ALL CAPS
+//////////////////////////////////////////////////////////////
+```
+
+**Rules:**
+- Empty line **above** the banner
+- Empty line **below** the banner
+- Use ALL CAPS for section names
+- Keep section names concise (fit on one line)
+- Use this format for all major sections (constants, utilities, core logic, UI, state, init)
+
+**Example:**
+
+```
+
+//////////////////////////////////////////////////////////////
+// CONSTANTS & CONFIGURATION
+//////////////////////////////////////////////////////////////
+
+const DEBUG = false;
+const LOG_PREFIX = '[example]';
+
+//////////////////////////////////////////////////////////////
+// UTILITIES & HELPERS
+//////////////////////////////////////////////////////////////
+
+const createLogger = (...) => { ... };
+```
 
 ## Testing & manual steps (minimum to document)
 
