@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Page Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.25.4
+// @version      2025.12.28.1215
 // @description  Unlock text selection, copy/paste, and context menu on restrictive sites. Optional overlay buster + aggressive mode. Lightweight + SPA-friendly.
 // @author       cbkii
 // @license      MIT
