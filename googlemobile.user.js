@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii (mobile UI by Claude)
 // @description  Mobile Google search helper with filters, dorks, and a compact UI.
-// @version      2025.12.28.1213
+// @version      2025.12.28.1310
 // @require      https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
 // @require      https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js
 // @match        *://www.google.*/search*
@@ -74,60 +74,88 @@
     }
   };
   // Robust shared UI detection across sandbox boundaries
+  // Try to use helper from userscriptui.user.js if available, otherwise use fallback
   let sharedUi = null;
   let sharedUiReady = false;
   let registrationAttempted = false;
 
-  const initSharedUi = (providedFactory) => {
-    // Priority 1: Use factory provided in event detail
-    let factory = providedFactory;
-    
-    // Priority 2: Check window (sandboxed context)
-    if (!factory && typeof window !== 'undefined' && window.__userscriptSharedUi) {
-      factory = window.__userscriptSharedUi;
-    }
-    
-    // Priority 3: Check unsafeWindow (page context)
-    if (!factory && typeof unsafeWindow !== 'undefined' && unsafeWindow.__userscriptSharedUi) {
-      factory = unsafeWindow.__userscriptSharedUi;
-    }
-    
-    if (factory && typeof factory.getInstance === 'function') {
-      sharedUi = factory.getInstance({
-        get: (key, fallback) => gmStore.get(key, fallback),
-        set: (key, value) => gmStore.set(key, value)
-      });
-      sharedUiReady = true;
-      return true;
-    }
-    return false;
-  };
-
-  // Try immediate detection
-  initSharedUi();
-
-  // Listen for shared UI ready event with proper detail consumption
-  document.addEventListener('userscriptSharedUiReady', (event) => {
-    setTimeout(() => {
-      // Try to get factory from event detail first
-      const providedFactory = event?.detail?.sharedUi;
+  // Check if userscriptui.user.js provides the helper (reduces code duplication)
+  const factory = (typeof window !== 'undefined' && window.__userscriptSharedUi) || 
+                   (typeof unsafeWindow !== 'undefined' && unsafeWindow.__userscriptSharedUi);
+  
+  if (factory && typeof factory.createDiscoveryHelper === 'function') {
+    // Use the helper from userscriptui.user.js
+    const helper = factory.createDiscoveryHelper({
+      scriptId: SCRIPT_ID,
+      scriptTitle: SCRIPT_TITLE,
+      gmStore: gmStore,
+      onReady: (ui, tryRegister) => {
+        sharedUi = ui;
+        sharedUiReady = true;
+        if (typeof state !== 'undefined' && typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+          tryRegister(renderPanel, (next) => setEnabled(next), state.enabled);
+        }
+      }
+    });
+    sharedUi = helper.sharedUi;
+    sharedUiReady = helper.isReady;
+  } else {
+    // Fallback: inline discovery logic (for backward compatibility)
+    const initSharedUi = (providedFactory) => {
+      // Priority 1: Use factory provided in event detail
+      let factory = providedFactory;
       
-      if (!sharedUiReady) {
-        initSharedUi(providedFactory);
+      // Priority 2: Check window (sandboxed context)
+      if (!factory && typeof window !== 'undefined' && window.__userscriptSharedUi) {
+        factory = window.__userscriptSharedUi;
       }
       
-      // Register/re-register if ready and not already done
-      if (sharedUi && typeof state !== 'undefined' && 
-          typeof renderPanel === 'function' && typeof setEnabled === 'function') {
-        if (!registrationAttempted) {
-          registrationAttempted = true;
-          sharedUi.registerScript({
-            id: SCRIPT_ID,
-            title: SCRIPT_TITLE,
-            enabled: state.enabled,
-            render: renderPanel,
-            onToggle: (next) => setEnabled(next)
-          });
+      // Priority 3: Check unsafeWindow (page context)
+      if (!factory && typeof unsafeWindow !== 'undefined' && unsafeWindow.__userscriptSharedUi) {
+        factory = unsafeWindow.__userscriptSharedUi;
+      }
+      
+      if (factory && typeof factory.getInstance === 'function') {
+        sharedUi = factory.getInstance({
+          get: (key, fallback) => gmStore.get(key, fallback),
+          set: (key, value) => gmStore.set(key, value)
+        });
+        sharedUiReady = true;
+        return true;
+      }
+      return false;
+    };
+
+    // Try immediate detection
+    initSharedUi();
+
+    // Listen for shared UI ready event with proper detail consumption
+    document.addEventListener('userscriptSharedUiReady', (event) => {
+      setTimeout(() => {
+        // Try to get factory from event detail first
+        const providedFactory = event?.detail?.sharedUi;
+        
+        if (!sharedUiReady) {
+          initSharedUi(providedFactory);
+        }
+        
+        // Register/re-register if ready and not already done
+        if (sharedUi && typeof state !== 'undefined' && 
+            typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+          if (!registrationAttempted) {
+            registrationAttempted = true;
+            sharedUi.registerScript({
+              id: SCRIPT_ID,
+              title: SCRIPT_TITLE,
+              enabled: state.enabled,
+              render: renderPanel,
+              onToggle: (next) => setEnabled(next)
+            });
+          }
+        }
+      }, 0);
+    });
+  }
         }
       }
     }, 0);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Shared UI Manager
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.28.1208
+// @version      2025.12.28.1308
 // @description  Provides a shared hotpink dock + dark modal with per-script tabs, toggles, and persistent layout for all userscripts.
 // @author       cbkii
 // @match        *://*/*
@@ -530,6 +530,72 @@
           instance = createUi(adapterRef);
         }
         return instance;
+      },
+      // Helper function for scripts to discover and initialize shared UI
+      // This reduces code duplication across scripts
+      createDiscoveryHelper(config) {
+        const { scriptId, scriptTitle, gmStore, onReady } = config;
+        let sharedUi = null;
+        let sharedUiReady = false;
+        let registrationAttempted = false;
+
+        const initSharedUi = (providedFactory) => {
+          let factory = providedFactory;
+          
+          if (!factory && typeof window !== 'undefined' && window.__userscriptSharedUi) {
+            factory = window.__userscriptSharedUi;
+          }
+          
+          if (!factory && typeof unsafeWindow !== 'undefined' && unsafeWindow.__userscriptSharedUi) {
+            factory = unsafeWindow.__userscriptSharedUi;
+          }
+          
+          if (factory && typeof factory.getInstance === 'function') {
+            sharedUi = factory.getInstance({
+              get: (key, fallback) => gmStore.get(key, fallback),
+              set: (key, value) => gmStore.set(key, value)
+            });
+            sharedUiReady = true;
+            return true;
+          }
+          return false;
+        };
+
+        const tryRegister = (renderPanel, onToggle, enabled) => {
+          if (sharedUi && !registrationAttempted && typeof renderPanel === 'function') {
+            registrationAttempted = true;
+            sharedUi.registerScript({
+              id: scriptId,
+              title: scriptTitle,
+              enabled: enabled,
+              render: renderPanel,
+              onToggle: onToggle
+            });
+          }
+        };
+
+        // Try immediate detection
+        initSharedUi();
+        
+        if (typeof document !== 'undefined') {
+          document.addEventListener('userscriptSharedUiReady', (event) => {
+            setTimeout(() => {
+              const providedFactory = event?.detail?.sharedUi;
+              if (!sharedUiReady) {
+                initSharedUi(providedFactory);
+              }
+              if (onReady && sharedUi) {
+                onReady(sharedUi, tryRegister);
+              }
+            }, 0);
+          });
+        }
+
+        return {
+          get sharedUi() { return sharedUi; },
+          get isReady() { return sharedUiReady; },
+          tryRegister
+        };
       }
     };
   })();
