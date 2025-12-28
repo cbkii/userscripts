@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Shared UI Manager
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.1742
+// @version      2025.12.28.1308
 // @description  Provides a shared hotpink dock + dark modal with per-script tabs, toggles, and persistent layout for all userscripts.
 // @author       cbkii
 // @match        *://*/*
@@ -518,7 +518,7 @@
   // INITIALIZATION
   //////////////////////////////////////////////////////////////
 
-  root.__userscriptSharedUi = (() => {
+  const sharedUiFactory = (() => {
     const adapterRef = { current: null };
     let instance = null;
     return {
@@ -530,11 +530,91 @@
           instance = createUi(adapterRef);
         }
         return instance;
+      },
+      // Helper function for scripts to discover and initialize shared UI
+      // This reduces code duplication across scripts
+      createDiscoveryHelper(config) {
+        const { scriptId, scriptTitle, gmStore, onReady } = config;
+        let sharedUi = null;
+        let sharedUiReady = false;
+        let registrationAttempted = false;
+
+        const initSharedUi = (providedFactory) => {
+          let factory = providedFactory;
+          
+          if (!factory && typeof window !== 'undefined' && window.__userscriptSharedUi) {
+            factory = window.__userscriptSharedUi;
+          }
+          
+          if (!factory && typeof unsafeWindow !== 'undefined' && unsafeWindow.__userscriptSharedUi) {
+            factory = unsafeWindow.__userscriptSharedUi;
+          }
+          
+          if (factory && typeof factory.getInstance === 'function') {
+            sharedUi = factory.getInstance({
+              get: (key, fallback) => gmStore.get(key, fallback),
+              set: (key, value) => gmStore.set(key, value)
+            });
+            sharedUiReady = true;
+            return true;
+          }
+          return false;
+        };
+
+        const tryRegister = (renderPanel, onToggle, enabled) => {
+          if (sharedUi && !registrationAttempted && typeof renderPanel === 'function') {
+            registrationAttempted = true;
+            sharedUi.registerScript({
+              id: scriptId,
+              title: scriptTitle,
+              enabled: enabled,
+              render: renderPanel,
+              onToggle: onToggle
+            });
+          }
+        };
+
+        // Try immediate detection
+        initSharedUi();
+        
+        if (typeof document !== 'undefined') {
+          document.addEventListener('userscriptSharedUiReady', (event) => {
+            setTimeout(() => {
+              const providedFactory = event?.detail?.sharedUi;
+              if (!sharedUiReady) {
+                initSharedUi(providedFactory);
+              }
+              if (onReady && sharedUi) {
+                onReady(sharedUi, tryRegister);
+              }
+            }, 0);
+          });
+        }
+
+        return {
+          get sharedUi() { return sharedUi; },
+          get isReady() { return sharedUiReady; },
+          tryRegister
+        };
       }
     };
   })();
 
+  // Expose on the root context (unsafeWindow in sandboxed scripts)
+  root.__userscriptSharedUi = sharedUiFactory;
+
+  // CRITICAL: Also expose on window when window !== root (sandbox boundary fix)
+  // This ensures scripts can discover shared UI from both contexts
+  if (typeof window !== 'undefined' && window !== root) {
+    try {
+      window.__userscriptSharedUi = sharedUiFactory;
+    } catch (_) {
+      // Ignore cross-context assignment errors
+    }
+  }
+
   // Dispatch custom event to notify other scripts that shared UI is ready
+  // Include sharedUi in event.detail for direct access
   setTimeout(() => {
     if (typeof document === 'undefined') return;
 
@@ -542,7 +622,7 @@
     try {
       if (typeof CustomEvent === 'function') {
         event = new CustomEvent('userscriptSharedUiReady', {
-          detail: { sharedUi: root.__userscriptSharedUi }
+          detail: { sharedUi: sharedUiFactory }
         });
       } else {
         event = document.createEvent('CustomEvent');
@@ -550,7 +630,7 @@
           'userscriptSharedUiReady',
           false,
           false,
-          { sharedUi: root.__userscriptSharedUi }
+          { sharedUi: sharedUiFactory }
         );
       }
     } catch (_) {

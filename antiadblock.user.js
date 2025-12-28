@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.27.1519
+// @version      2025.12.28.1310
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @match        *://*/*
@@ -71,58 +71,90 @@
       try { await GM_setValue(key, value); } catch (_) {}
     }
   };
-  // Event-based shared UI detection to prevent race conditions
-
+  // Robust shared UI detection across sandbox boundaries
+  // Try to use helper from userscriptui.user.js if available, otherwise use fallback
   let sharedUi = null;
-
   let sharedUiReady = false;
+  let registrationAttempted = false;
 
-
-  const initSharedUi = () => {
-
-    if (typeof window !== 'undefined' && window.__userscriptSharedUi) {
-
-      sharedUi = window.__userscriptSharedUi.getInstance({
-
-        get: (key, fallback) => gmStore.get(key, fallback),
-
-        set: (key, value) => gmStore.set(key, value)
-
-      });
-
-      sharedUiReady = true;
-
-      return true;
-
-    }
-
-    return false;
-
-  };
-
-
-  // Try immediate detection
-
-  initSharedUi();
-
-
-  // Listen for shared UI ready event - deferred to ensure all variables are initialized
-  document.addEventListener('userscriptSharedUiReady', () => {
-    setTimeout(() => {
-      if (!sharedUiReady) {
-        initSharedUi();
+  // Check if userscriptui.user.js provides the helper (reduces code duplication)
+  const factory = (typeof window !== 'undefined' && window.__userscriptSharedUi) || 
+                   (typeof unsafeWindow !== 'undefined' && unsafeWindow.__userscriptSharedUi);
+  
+  if (factory && typeof factory.createDiscoveryHelper === 'function') {
+    // Use the helper from userscriptui.user.js
+    const helper = factory.createDiscoveryHelper({
+      scriptId: SCRIPT_ID,
+      scriptTitle: SCRIPT_TITLE,
+      gmStore: gmStore,
+      onReady: (ui, tryRegister) => {
+        sharedUi = ui;
+        sharedUiReady = true;
+        if (typeof state !== 'undefined' && typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+          tryRegister(renderPanel, (next) => setEnabled(next), state.enabled);
+        }
       }
-      // Re-register if needed after shared UI becomes available
-      // Guard: ensure required variables are initialized
-      if (sharedUi && typeof state !== 'undefined' && state.enabled && 
-          typeof renderPanel === 'function' && typeof setEnabled === 'function') {
-        sharedUi.registerScript({
-          id: SCRIPT_ID,
-          title: SCRIPT_TITLE,
-          enabled: state.enabled,
-          render: renderPanel,
-          onToggle: (next) => setEnabled(next)
+    });
+    sharedUi = helper.sharedUi;
+    sharedUiReady = helper.isReady;
+  } else {
+    // Fallback: inline discovery logic (for backward compatibility)
+    const initSharedUi = (providedFactory) => {
+      // Priority 1: Use factory provided in event detail
+      let factory = providedFactory;
+      
+      // Priority 2: Check window (sandboxed context)
+      if (!factory && typeof window !== 'undefined' && window.__userscriptSharedUi) {
+        factory = window.__userscriptSharedUi;
+      }
+      
+      // Priority 3: Check unsafeWindow (page context)
+      if (!factory && typeof unsafeWindow !== 'undefined' && unsafeWindow.__userscriptSharedUi) {
+        factory = unsafeWindow.__userscriptSharedUi;
+      }
+      
+      if (factory && typeof factory.getInstance === 'function') {
+        sharedUi = factory.getInstance({
+          get: (key, fallback) => gmStore.get(key, fallback),
+          set: (key, value) => gmStore.set(key, value)
         });
+        sharedUiReady = true;
+        return true;
+      }
+      return false;
+    };
+
+    // Try immediate detection
+    initSharedUi();
+
+    // Listen for shared UI ready event with proper detail consumption
+    document.addEventListener('userscriptSharedUiReady', (event) => {
+      setTimeout(() => {
+        // Try to get factory from event detail first
+        const providedFactory = event?.detail?.sharedUi;
+        
+        if (!sharedUiReady) {
+          initSharedUi(providedFactory);
+        }
+        
+        // Register/re-register if ready and not already done
+        if (sharedUi && typeof state !== 'undefined' && 
+            typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+          if (!registrationAttempted) {
+            registrationAttempted = true;
+            sharedUi.registerScript({
+              id: SCRIPT_ID,
+              title: SCRIPT_TITLE,
+              enabled: state.enabled,
+              render: renderPanel,
+              onToggle: (next) => setEnabled(next)
+            });
+          }
+        }
+      }, 0);
+    });
+  }
+        }
       }
     }, 0);
   });
@@ -1573,6 +1605,32 @@
     info.style.fontSize = '13px';
     wrapper.appendChild(info);
 
+    const cfg = getConfig();
+    const globalToggle = document.createElement('div');
+    globalToggle.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px;';
+    
+    const toggleLabel = document.createElement('span');
+    toggleLabel.textContent = 'Global anti-adblock (all sites)';
+    toggleLabel.style.cssText = 'flex: 1; color: #cbd5e1; font-size: 13px;';
+    
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.textContent = cfg.globalEnabled ? 'ON' : 'OFF';
+    toggleBtn.style.cssText = `padding: 4px 12px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.2); cursor: pointer; font-size: 11px; font-weight: 700; ${cfg.globalEnabled ? 'background: #10b981; color: #111;' : 'background: #374151; color: #9ca3af;'}`;
+    toggleBtn.addEventListener('click', () => {
+      const currentCfg = getConfig();
+      const nextEnabled = !currentCfg.globalEnabled;
+      setConfig({ globalEnabled: nextEnabled });
+      toggleBtn.textContent = nextEnabled ? 'ON' : 'OFF';
+      toggleBtn.style.background = nextEnabled ? '#10b981' : '#374151';
+      toggleBtn.style.color = nextEnabled ? '#111' : '#9ca3af';
+      setTimeout(() => location.reload(), 300);
+    });
+    
+    globalToggle.appendChild(toggleLabel);
+    globalToggle.appendChild(toggleBtn);
+    wrapper.appendChild(globalToggle);
+
     const runBtn = document.createElement('button');
     runBtn.type = 'button';
     runBtn.textContent = 'Run fixes now';
@@ -1581,6 +1639,7 @@
     runBtn.style.border = '1px solid rgba(255,255,255,0.18)';
     runBtn.style.background = '#1f2937';
     runBtn.style.color = '#f8fafc';
+    runBtn.style.cursor = 'pointer';
     runBtn.addEventListener('click', () => {
       if (state.enabled) start();
     });
@@ -1637,7 +1696,8 @@
 
   const init = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
-    if (sharedUi) {
+    if (sharedUi && !registrationAttempted) {
+      registrationAttempted = true;
       sharedUi.registerScript({
         id: SCRIPT_ID,
         title: SCRIPT_TITLE,

@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii (mobile UI by Claude)
 // @description  Mobile Google search helper with filters, dorks, and a compact UI.
-// @version      2025.12.27.1519
+// @version      2025.12.28.1333
 // @require      https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
 // @require      https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js
 // @match        *://www.google.*/search*
@@ -73,61 +73,89 @@
       try { await GM_setValue(key, value); } catch (_) {}
     }
   };
-  // Event-based shared UI detection to prevent race conditions
-
+  // Robust shared UI detection across sandbox boundaries
+  // Try to use helper from userscriptui.user.js if available, otherwise use fallback
   let sharedUi = null;
-
   let sharedUiReady = false;
+  let registrationAttempted = false;
 
-
-  const initSharedUi = () => {
-
-    if (typeof window !== 'undefined' && window.__userscriptSharedUi) {
-
-      sharedUi = window.__userscriptSharedUi.getInstance({
-
-        get: (key, fallback) => gmStore.get(key, fallback),
-
-        set: (key, value) => gmStore.set(key, value)
-
-      });
-
-      sharedUiReady = true;
-
-      return true;
-
-    }
-
-    return false;
-
-  };
-
-
-  // Try immediate detection
-
-  initSharedUi();
-
-
-  // Listen for shared UI ready event - deferred to ensure all variables are initialized
-  document.addEventListener('userscriptSharedUiReady', () => {
-    setTimeout(() => {
-      if (!sharedUiReady) {
-        initSharedUi();
+  // Check if userscriptui.user.js provides the helper (reduces code duplication)
+  const factory = (typeof window !== 'undefined' && window.__userscriptSharedUi) || 
+                   (typeof unsafeWindow !== 'undefined' && unsafeWindow.__userscriptSharedUi);
+  
+  if (factory && typeof factory.createDiscoveryHelper === 'function') {
+    // Use the helper from userscriptui.user.js
+    const helper = factory.createDiscoveryHelper({
+      scriptId: SCRIPT_ID,
+      scriptTitle: SCRIPT_TITLE,
+      gmStore: gmStore,
+      onReady: (ui, tryRegister) => {
+        sharedUi = ui;
+        sharedUiReady = true;
+        if (typeof state !== 'undefined' && typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+          tryRegister(renderPanel, (next) => setEnabled(next), state.enabled);
+        }
       }
-      // Re-register if needed after shared UI becomes available
-      // Guard: ensure required variables are initialized
-      if (sharedUi && typeof state !== 'undefined' && state.enabled && 
-          typeof renderPanel === 'function' && typeof setEnabled === 'function') {
-        sharedUi.registerScript({
-          id: SCRIPT_ID,
-          title: SCRIPT_TITLE,
-          enabled: state.enabled,
-          render: renderPanel,
-          onToggle: (next) => setEnabled(next)
+    });
+    sharedUi = helper.sharedUi;
+    sharedUiReady = helper.isReady;
+  } else {
+    // Fallback: inline discovery logic (for backward compatibility)
+    const initSharedUi = (providedFactory) => {
+      // Priority 1: Use factory provided in event detail
+      let factory = providedFactory;
+      
+      // Priority 2: Check window (sandboxed context)
+      if (!factory && typeof window !== 'undefined' && window.__userscriptSharedUi) {
+        factory = window.__userscriptSharedUi;
+      }
+      
+      // Priority 3: Check unsafeWindow (page context)
+      if (!factory && typeof unsafeWindow !== 'undefined' && unsafeWindow.__userscriptSharedUi) {
+        factory = unsafeWindow.__userscriptSharedUi;
+      }
+      
+      if (factory && typeof factory.getInstance === 'function') {
+        sharedUi = factory.getInstance({
+          get: (key, fallback) => gmStore.get(key, fallback),
+          set: (key, value) => gmStore.set(key, value)
         });
+        sharedUiReady = true;
+        return true;
       }
-    }, 0);
-  });
+      return false;
+    };
+
+    // Try immediate detection
+    initSharedUi();
+
+    // Listen for shared UI ready event with proper detail consumption
+    document.addEventListener('userscriptSharedUiReady', (event) => {
+      setTimeout(() => {
+        // Try to get factory from event detail first
+        const providedFactory = event?.detail?.sharedUi;
+        
+        if (!sharedUiReady) {
+          initSharedUi(providedFactory);
+        }
+        
+        // Register/re-register if ready and not already done
+        if (sharedUi && typeof state !== 'undefined' && 
+            typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+          if (!registrationAttempted) {
+            registrationAttempted = true;
+            sharedUi.registerScript({
+              id: SCRIPT_ID,
+              title: SCRIPT_TITLE,
+              enabled: state.enabled,
+              render: renderPanel,
+              onToggle: (next) => setEnabled(next)
+            });
+          }
+        }
+      }, 0);
+    });
+  }
   const state = {
     enabled: true,
     started: false,
@@ -1701,39 +1729,210 @@ if (document.readyState === 'loading') {
 
   }
 
-  const harvestPanel = () => {
-    const container = document.getElementById('google-expert-ui');
-    const panel = document.getElementById('google-expert-panel');
-    const overlay = document.getElementById('google-expert-overlay');
-    const fab = document.getElementById('google-expert-fab');
-    if (!panel) return null;
-    if (panel.parentNode) panel.parentNode.removeChild(panel);
-    if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
-    if (fab && fab.parentNode) fab.parentNode.removeChild(fab);
-    if (container && container.parentNode) container.parentNode.removeChild(container);
-    panel.style.position = 'static';
-    panel.style.boxShadow = 'none';
-    panel.style.maxHeight = 'unset';
-    panel.style.width = '100%';
-    return panel;
-  };
-
   //////////////////////////////////////////////////////////////
-  // UI COMPONENTS
+  // UI COMPONENTS (Refactored for Shared UI Standards)
   //////////////////////////////////////////////////////////////
 
   const renderPanel = () => {
     if (!state.started && state.enabled) {
       start();
     }
-    const panel = harvestPanel();
-    if (panel) return panel;
-    const fallback = document.createElement('div');
-    fallback.textContent = 'Google search helper is initialising… toggle it on if needed.';
-    fallback.style.color = '#e5e7eb';
-    fallback.style.fontSize = '13px';
-    return fallback;
+
+    const panel = document.createElement('div');
+    panel.style.cssText = 'padding: 12px; color: #e5e7eb; font-family: system-ui, sans-serif; font-size: 13px; max-height: 600px; overflow-y: auto;';
+
+    // Title
+    const title = document.createElement('h3');
+    title.textContent = 'Google Expert Search Pro';
+    title.style.cssText = 'margin: 0 0 4px 0; font-size: 16px; font-weight: 700; color: #f8fafc;';
+    panel.appendChild(title);
+
+    const subtitle = document.createElement('div');
+    subtitle.textContent = 'Advanced search filters & smart dorks';
+    subtitle.style.cssText = 'margin: 0 0 12px 0; font-size: 11px; color: #94a3b8;';
+    panel.appendChild(subtitle);
+
+    // Search input section
+    const searchSection = document.createElement('div');
+    searchSection.style.cssText = 'margin-bottom: 14px; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 6px;';
+    
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Enter search terms here (optional)...';
+    searchInput.id = 'expert-search-input-shared';
+    searchInput.style.cssText = 'width: 100%; padding: 8px; background: #1f2937; color: #e5e7eb; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; font-size: 13px; margin-bottom: 8px;';
+    searchSection.appendChild(searchInput);
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display: flex; gap: 6px;';
+    
+    const searchBtn = document.createElement('button');
+    searchBtn.textContent = 'Search';
+    searchBtn.style.cssText = 'flex: 1; padding: 6px 12px; background: #3b82f6; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;';
+    searchBtn.addEventListener('click', () => {
+      const query = document.getElementById('expert-search-input-shared').value;
+      if (query) {
+        window.location.href = 'https://www.google.com/search?q=' + encodeURIComponent(query);
+      }
+    });
+    searchBtn.addEventListener('mouseenter', () => { searchBtn.style.background = '#2563eb'; });
+    searchBtn.addEventListener('mouseleave', () => { searchBtn.style.background = '#3b82f6'; });
+    
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = 'Clear';
+    clearBtn.style.cssText = 'padding: 6px 12px; background: #6b7280; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;';
+    clearBtn.addEventListener('click', () => {
+      document.getElementById('expert-search-input-shared').value = '';
+    });
+    clearBtn.addEventListener('mouseenter', () => { clearBtn.style.background = '#4b5563'; });
+    clearBtn.addEventListener('mouseleave', () => { clearBtn.style.background = '#6b7280'; });
+    
+    btnRow.appendChild(searchBtn);
+    btnRow.appendChild(clearBtn);
+    searchSection.appendChild(btnRow);
+    panel.appendChild(searchSection);
+
+    // Helper to create category button
+    const createCategoryBtn = (label, count, onClick) => {
+      const btn = document.createElement('button');
+      btn.textContent = `${label} (${count})`;
+      btn.style.cssText = 'display: block; width: 100%; text-align: left; padding: 8px 10px; margin: 4px 0; background: rgba(255,255,255,0.05); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; cursor: pointer; font-size: 12px; transition: all 0.2s;';
+      btn.addEventListener('click', onClick);
+      btn.addEventListener('mouseenter', () => {
+        btn.style.background = 'rgba(59,130,246,0.2)';
+        btn.style.borderColor = 'rgba(59,130,246,0.4)';
+      });
+      btn.addEventListener('mouseleave', () => {
+        btn.style.background = 'rgba(255,255,255,0.05)';
+        btn.style.borderColor = 'rgba(255,255,255,0.1)';
+      });
+      return btn;
+    };
+
+    // Helper to show array contents in a modal
+    const showArrayModal = (title, array, type) => {
+      // Remove existing modal if any
+      const existing = document.getElementById('google-expert-modal-shared');
+      if (existing) existing.remove();
+
+      const modal = document.createElement('div');
+      modal.id = 'google-expert-modal-shared';
+      modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2147483646; display: flex; align-items: center; justify-content: center; padding: 20px;';
+      
+      const content = document.createElement('div');
+      content.style.cssText = 'background: #1f2937; border-radius: 8px; max-width: 600px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column;';
+      
+      const header = document.createElement('div');
+      header.style.cssText = 'padding: 16px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;';
+      const headerTitle = document.createElement('h3');
+      headerTitle.textContent = title;
+      headerTitle.style.cssText = 'margin: 0; font-size: 16px; color: #f8fafc; font-weight: 600;';
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = '✕';
+      closeBtn.style.cssText = 'background: none; border: none; color: #9ca3af; font-size: 20px; cursor: pointer; padding: 0; width: 28px; height: 28px;';
+      closeBtn.addEventListener('click', () => modal.remove());
+      header.appendChild(headerTitle);
+      header.appendChild(closeBtn);
+      
+      const body = document.createElement('div');
+      body.style.cssText = 'padding: 16px; overflow-y: auto; flex: 1;';
+      
+      array.forEach(item => {
+        const chip = document.createElement('span');
+        chip.textContent = item;
+        chip.style.cssText = 'display: inline-block; margin: 4px; padding: 6px 10px; background: rgba(59,130,246,0.2); color: #93c5fd; border-radius: 4px; font-size: 11px; border: 1px solid rgba(59,130,246,0.3);';
+        body.appendChild(chip);
+      });
+      
+      content.appendChild(header);
+      content.appendChild(body);
+      modal.appendChild(content);
+      document.body.appendChild(modal);
+      
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+      });
+    };
+
+    // Render category groups
+    const categoryGroups = [
+      {
+        groupName: 'Site Filters',
+        groupIcon: '🌐',
+        categories: [
+          { array: academicSites, label: 'Academic & Research', type: 'urls' },
+          { array: auctionUrl, label: 'Auctions & Marketplace', type: 'urls' },
+          { array: blogUrl, label: 'Blogs & Writing', type: 'urls' },
+          { array: devSites, label: 'Developer Resources', type: 'urls' },
+          { array: fileshareUrl, label: 'File Sharing & Cloud Storage', type: 'urls' },
+          { array: forumSites, label: 'Forums & Communities', type: 'urls' },
+          { array: govSites, label: 'Government & Legal', type: 'urls' },
+          { array: jobSites, label: 'Job Sites', type: 'urls' },
+          { array: newsSites, label: 'News & Media', type: 'urls' },
+          { array: onlineshoppingUrl, label: 'Online Shopping', type: 'urls' },
+          { array: torrentUrl, label: 'Torrents', type: 'urls' },
+          { array: videostreamUrl, label: 'Video Streaming', type: 'urls' },
+          { array: xvideoUrl, label: 'XXX Adult', type: 'urls' }
+        ]
+      },
+      {
+        groupName: 'File Types',
+        groupIcon: '📁',
+        categories: [
+          { array: archiveExt, label: 'Archives', type: 'extensions' },
+          { array: audioExt, label: 'Audio Files', type: 'extensions' },
+          { array: basicSourceExt, label: 'Basic Source', type: 'extensions' },
+          { array: cppSourceExt, label: 'C++ Source', type: 'extensions' },
+          { array: csharpSourceExt, label: 'C# Source', type: 'extensions' },
+          { array: documentExt, label: 'Documents', type: 'extensions' },
+          { array: execExt, label: 'Executables', type: 'extensions' },
+          { array: fontExt, label: 'Font Files', type: 'extensions' },
+          { array: imageExt, label: 'Image Files', type: 'extensions' },
+          { array: javaSourceExt, label: 'Java Source', type: 'extensions' },
+          { array: miscExt, label: 'Misc Files', type: 'extensions' },
+          { array: perlSourceExt, label: 'Perl Source', type: 'extensions' },
+          { array: presentationExt, label: 'Presentations', type: 'extensions' },
+          { array: pythonSourceExt, label: 'Python Source', type: 'extensions' },
+          { array: datasheetExt, label: 'Spreadsheets', type: 'extensions' },
+          { array: videoExt, label: 'Video Files', type: 'extensions' },
+          { array: xmlExt, label: 'XML Files', type: 'extensions' }
+        ]
+      },
+      {
+        groupName: 'Smart Dorks',
+        groupIcon: '🔍',
+        categories: [
+          { array: audioDorks, label: 'Audio File Search', type: 'dorks' },
+          { array: exposedFilesDorks, label: 'Exposed Files', type: 'dorks' },
+          { array: indexDorks, label: 'Index Browsing', type: 'dorks' },
+          { array: specialDorks, label: 'Special Operators', type: 'dorks' },
+          { array: timeDorks, label: 'Time-based Search', type: 'dorks' }
+        ]
+      }
+    ];
+
+    categoryGroups.forEach(group => {
+      const groupSection = document.createElement('div');
+      groupSection.style.cssText = 'margin-bottom: 16px;';
+      
+      const groupHeader = document.createElement('div');
+      groupHeader.textContent = `${group.groupIcon} ${group.groupName}`;
+      groupHeader.style.cssText = 'font-size: 14px; font-weight: 600; color: #f8fafc; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.1);';
+      groupSection.appendChild(groupHeader);
+      
+      group.categories.forEach(cat => {
+        const btn = createCategoryBtn(cat.label, cat.array.length, () => {
+          showArrayModal(`${group.groupIcon} ${cat.label}`, cat.array, cat.type);
+        });
+        groupSection.appendChild(btn);
+      });
+      
+      panel.appendChild(groupSection);
+    });
+
+    return panel;
   };
+
 
   //////////////////////////////////////////////////////////////
   // STATE MANAGEMENT
@@ -1805,7 +2004,8 @@ if (document.readyState === 'loading') {
 
   const initToggle = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
-    if (sharedUi) {
+    if (sharedUi && !registrationAttempted) {
+      registrationAttempted = true;
       sharedUi.registerScript({
         id: SCRIPT_ID,
         title: SCRIPT_TITLE,
