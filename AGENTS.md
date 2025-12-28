@@ -73,12 +73,13 @@ Use these unless you have a strong reason not to:
 - `@version` using datetime format `YYYY.MM.DD.HHMM` (e.g., `2025.12.23.2043`).
   - Use the **current UTC datetime** at the moment you code or commit. If that is not possible, use the file’s modified time (UTC). If neither is possible or it conflicts, **increment by 1 minute** (HHMM + 1). Versions must never decrease.
 - `@description` (concise English-only summary of main purpose and key features)
+- `@author`
+- `@icon` (required: base64-encoded SVG data URI with hot pink `#FF1493` stroke, placed after `@author` and before `@match`)
 - `@match` (preferred) or `@include`
 - `@run-at` (deliberate choice)
 - `@grant` (explicit list; see below)
 
 ### 2.3 Strongly recommended keys
-- `@author`
 - `@license` (if you publish)
 - `@noframes` (if you do not want to run inside iframes)
 - `@homepageURL` set to `https://github.com/cbkii/userscripts`
@@ -86,6 +87,18 @@ Use these unless you have a strong reason not to:
 - `@updateURL` and `@downloadURL` both set to the raw GitHub URL for the script on `main`, e.g.:
   - `https://raw.githubusercontent.com/cbkii/userscripts/main/<script>.user.js`
 - `@connect` (for any cross-origin network use)
+
+### 2.3a Icon requirements (mandatory)
+Every userscript must include an `@icon` metadata field:
+- **Format**: Base64-encoded SVG data URI (`data:image/svg+xml;base64,<encoded-svg>`)
+- **Style**: Simple line-style icon with consistent stroke weight (2px recommended)
+- **Color**: Hot pink `#FF1493` stroke color for consistency across all scripts
+- **Design**: Choose imagery relevant to the script's purpose
+  - Examples: shield for security/blocking, download arrow for export, unlock for access removal, search magnifier for search tools, moon for dark mode, document for content extraction
+- **Size**: Lightweight SVG (typically 24×24 viewBox)
+- **Source**: Use consistent design set (e.g., Feather, Lucide, or similar line icon sets)
+- **Position**: Place after `@author` and before `@match` in the metadata block
+- **Consistency**: All icons should be from the same visual style/design family
 
 ### 2.4 Tampermonkey gotchas (important)
 - Tampermonkey requires at least one `@match` or `@include` for a script to run.
