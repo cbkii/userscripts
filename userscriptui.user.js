@@ -1,10 +1,14 @@
 // ==UserScript==
 // @name         Userscript Shared UI Manager
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.28.1308
+// @version      2025.12.28.1434
 // @description  Provides a shared hotpink dock + dark modal with per-script tabs, toggles, and persistent layout for all userscripts.
 // @author       cbkii
 // @match        *://*/*
+// @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
+// @downloadURL  https://raw.githubusercontent.com/cbkii/userscripts/main/userscriptui.user.js
+// @homepageURL  https://github.com/cbkii/userscripts
+// @supportURL   https://github.com/cbkii/userscripts/issues
 // @run-at       document-idle
 // @noframes
 // @grant        GM_getValue
