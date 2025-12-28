@@ -1,11 +1,15 @@
 // ==UserScript==
 // @name         Page Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.28.1322
+// @version      2025.12.28.1434
 // @description  Unlock text selection, copy/paste, and context menu on restrictive sites. Optional overlay buster + aggressive mode. Lightweight + SPA-friendly.
 // @author       cbkii
 // @license      MIT
 // @match        *://*/*
+// @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageunlock.user.js
+// @downloadURL  https://raw.githubusercontent.com/cbkii/userscripts/main/pageunlock.user.js
+// @homepageURL  https://github.com/cbkii/userscripts
+// @supportURL   https://github.com/cbkii/userscripts/issues
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
@@ -14,6 +18,23 @@
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
+
+/*
+  Feature summary:
+  - Unlocks text selection, copy/paste, and right-click context menu on restrictive sites.
+  - Removes annoying full-screen overlays that block content access.
+  - Provides aggressive mode for page-context event patching on stubborn sites.
+
+  How it works:
+  - Injects CSS to enable text selection and removes event handlers that block user interactions.
+  - Optionally patches addEventListener at document-start to prevent restrictive event handlers.
+  - Detects and removes full-screen overlays that gate content behind paywalls or ads.
+
+  Configuration:
+  - Toggle aggressive mode, overlay buster, and other options via menu commands.
+  - Per-host disable list to exclude sites where unlocking causes issues.
+  - Keyboard shortcut (Alt+Shift+U by default) to quickly toggle the unlocker.
+*/
 
 (function () {
   'use strict';

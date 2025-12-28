@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.28.1310
+// @version      2025.12.28.1513
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions.
 // @author       cbcoz
 // @match        *://chat.openai.com/*
@@ -23,17 +23,23 @@
 /*
   Feature summary:
   - Adds export buttons to save ChatGPT chats as Markdown, JSON, or plain text.
+  - Enhanced message detection with robust DOM selectors and validation.
+  - Improved sender identification using multiple detection methods.
+  - Automatic duplicate removal and sender sequence correction.
   - Supports robust DOM selectors and an optional API export mode.
   - Includes clipboard copy and Android share-sheet fallbacks.
   - Formats Deep Research citations as Markdown footnotes when detected.
 
   How it works:
   - Injects export controls near the input area and watches for SPA navigation.
-  - Collects messages from the DOM (or API when enabled) and converts to Markdown.
-  - Downloads, copies, or shares the generated export content.
+  - Collects messages from the DOM using multiple selector strategies with content validation.
+  - Identifies senders (User vs ChatGPT) using data attributes, avatars, content analysis, and structural heuristics.
+  - Removes duplicates via content hashing and fixes consecutive same-sender messages.
+  - Converts HTML to clean Markdown and downloads, copies, or shares the generated export.
 
   Configuration:
   - Toggle API export or citation formatting in the export popup.
+  - Set DEBUG to true for detailed console logging.
 */
 
 (() => {
@@ -730,27 +736,144 @@
     if (!nodes.length) return [];
 
     const converter = new MarkdownConverter({ enableCitations });
+    
+    // Extract messages with content hash for duplicate detection
+    const processedMessages = [];
+    const seenContent = new Set();
 
-    return nodes
-      .map(node => extractMessageFromNode(node, converter))
-      .filter(Boolean);
+    nodes.forEach((node, index) => {
+      const messageData = extractMessageFromNode(node, converter);
+      if (!messageData) return;
+      
+      const content = messageData.markdown;
+      
+      // Skip only truly empty messages (avoid losing short user replies like "OK")
+      if (!content || !content.trim()) {
+        if (DEBUG) {
+          log('debug', `Skipping message ${index}: empty`);
+        }
+        return;
+      }
+
+      // Create a content hash for duplicate detection
+      const contentHash = content.substring(0, 100).replace(/\s+/g, ' ').trim();
+      if (seenContent.has(contentHash)) {
+        if (DEBUG) {
+          log('debug', `Skipping message ${index}: duplicate content`);
+        }
+        return;
+      }
+      seenContent.add(contentHash);
+
+      processedMessages.push({
+        role: messageData.role,
+        markdown: content,
+        originalIndex: index
+      });
+    });
+
+    // Apply sender sequence correction to fix consecutive same-role messages
+    for (let i = 1; i < processedMessages.length; i++) {
+      const current = processedMessages[i];
+      const previous = processedMessages[i - 1];
+      
+      // If we have two consecutive messages from the same sender, try to fix it
+      if (current.role === previous.role) {
+        // Use content analysis to determine which should be flipped
+        const currentLength = current.markdown.length;
+        const previousLength = previous.markdown.length;
+        
+        // If current message is much longer, it's likely ChatGPT
+        if (currentLength > previousLength * 2 && currentLength > 500) {
+          current.role = 'assistant';
+        } else if (previousLength > currentLength * 2 && previousLength > 500) {
+          previous.role = 'assistant';
+          current.role = 'user';
+        } else {
+          // Default alternating fix
+          current.role = current.role === 'user' ? 'assistant' : 'user';
+        }
+        
+        if (DEBUG) {
+          log('debug', `Fixed consecutive ${previous.role} messages at positions ${i-1} and ${i}`);
+        }
+      }
+    }
+
+    return processedMessages.map(({ role, markdown }) => ({ role, markdown }));
   }
 
   function getMessageNodes() {
+    // Enhanced selector list with better coverage for conversation turns
     const selectors = [
-      'article[data-message-author-role]',
-      'article[data-testid^="conversation-turn"]',
-      '[data-message-author-role]'
+      'div[data-message-author-role]',           // Modern ChatGPT with clear author role
+      'article[data-testid*="conversation-turn"]', // Conversation turns
+      'article[data-message-author-role]',       // Article-based messages
+      'div[data-testid="conversation-turn"]',     // Specific conversation turn
+      '.group\\/conversation-turn',               // Fix for nested groups
+      'div[class*="group"]:not([class*="group"] [class*="group"])', // Top-level groups only
     ];
-    const nodeSet = new Set();
-    selectors.forEach(selector => {
-      document.querySelectorAll(selector).forEach(node => nodeSet.add(node));
+
+    let messages = [];
+    for (const selector of selectors) {
+      messages = document.querySelectorAll(selector);
+      if (messages.length > 0) {
+        if (DEBUG) {
+          log('debug', `Using selector: ${selector}, found ${messages.length} messages`);
+        }
+        break;
+      }
+    }
+
+    if (messages.length === 0) {
+      // Fallback: try to find conversation container and parse its structure
+      const conversationContainer = document.querySelector('[role="main"], main, .conversation, [class*="conversation"]');
+      if (conversationContainer) {
+        messages = conversationContainer.querySelectorAll(':scope > div, :scope > article');
+        if (DEBUG) {
+          log('debug', `Fallback: found ${messages.length} potential messages in conversation container`);
+        }
+      }
+    }
+
+    // Filter and validate messages
+    const validMessages = Array.from(messages).filter(msg => {
+      const text = msg.textContent.trim();
+      
+      // Must have substantial content
+      if (text.length < 30) return false;
+      if (text.length > 100000) return false;
+      
+      // Skip elements that are clearly UI components
+      if (msg.querySelector('input[type="text"], textarea')) return false;
+      if (msg.classList.contains('typing') || msg.classList.contains('loading')) return false;
+      
+      // Must contain meaningful content (not just buttons/UI)
+      const meaningfulText = text.replace(/\s+/g, ' ').trim();
+      if (meaningfulText.split(' ').length < 5) return false;
+      
+      return true;
     });
 
-    const nodes = Array.from(nodeSet);
-    if (nodes.length) return nodes;
+    // Remove nested messages and consolidate content
+    const consolidatedMessages = [];
+    const usedElements = new Set();
 
-    return Array.from(document.querySelectorAll('.text-base'));
+    validMessages.forEach(msg => {
+      if (usedElements.has(msg)) return;
+      
+      // Check if this message is nested within another valid message
+      const isNested = validMessages.some(other => 
+        other !== msg && other.contains(msg) && !usedElements.has(other)
+      );
+      
+      if (!isNested) {
+        consolidatedMessages.push(msg);
+        usedElements.add(msg);
+      }
+    });
+
+    return consolidatedMessages;
   }
 
   function extractMessageFromNode(node, converter) {
@@ -768,30 +891,90 @@
   }
 
   function resolveRoleAndContent(node) {
+    // Method 1: Check for data attributes (most reliable)
     let role = node.getAttribute('data-message-author-role');
     let contentNode = node;
 
+    if (role) {
+      const markdownNode =
+        node.querySelector('.markdown') ||
+        node.querySelector('[class*="markdown"]') ||
+        node;
+      return { role, contentNode: markdownNode };
+    }
+
+    // Method 2: Look for nested role attributes
+    const roleNode = node.querySelector('[data-message-author-role]');
+    if (roleNode) {
+      role = roleNode.getAttribute('data-message-author-role');
+      contentNode = roleNode;
+    }
+
+    // Method 3: Check for avatar images with better detection
     if (!role) {
-      const roleNode = node.querySelector('[data-message-author-role]');
-      if (roleNode) {
-        role = roleNode.getAttribute('data-message-author-role');
-        contentNode = roleNode;
+      const avatars = node.querySelectorAll('img');
+      for (const avatar of avatars) {
+        const alt = avatar.alt?.toLowerCase() || '';
+        const src = avatar.src?.toLowerCase() || '';
+        const classes = avatar.className?.toLowerCase() || '';
+        
+        // User indicators
+        if (alt.includes('user') || src.includes('user') || classes.includes('user')) {
+          role = 'user';
+          break;
+        }
+        
+        // Assistant indicators
+        if (alt.includes('chatgpt') || alt.includes('assistant') || alt.includes('gpt') || 
+            src.includes('assistant') || src.includes('chatgpt') || classes.includes('assistant')) {
+          role = 'assistant';
+          break;
+        }
       }
     }
 
+    // Method 4: Look for role labels in the DOM
     if (!role) {
-      const roleLabel = node.querySelector('.whitespace-nowrap');
+      const roleLabel = node.querySelector('.whitespace-nowrap, [class*="label"], [class*="role"]');
       const labelText = roleLabel?.textContent?.trim().toLowerCase() || '';
       if (labelText.includes('you')) role = 'user';
       if (labelText.includes('assistant') || labelText.includes('chatgpt')) role = 'assistant';
     }
 
+    // Method 5: Content analysis with better patterns
+    if (!role) {
+      const text = node.textContent.toLowerCase();
+      const textStart = text.substring(0, 200); // Look at beginning of message
+      
+      // Strong ChatGPT indicators
+      if (textStart.match(/^(i understand|i can help|here's|i'll|let me|i'd be happy|certainly|of course)/)) {
+        role = 'assistant';
+      }
+      
+      // Strong user indicators  
+      if (textStart.match(/^(can you|please help|how do i|i need|i want|help me|could you)/)) {
+        role = 'user';
+      }
+    }
+
+    // Method 6: Structural analysis
+    if (!role) {
+      const hasCodeBlocks = node.querySelectorAll('pre, code').length > 0;
+      const hasLongText = node.textContent.length > 200;
+      const hasLists = node.querySelectorAll('ul, ol, li').length > 0;
+      
+      // ChatGPT messages tend to be longer and more structured
+      if (hasCodeBlocks && hasLongText && hasLists) {
+        role = 'assistant';
+      }
+    }
+
     const markdownNode =
       contentNode.querySelector('.markdown') ||
-      node.querySelector('.markdown') ||
+      contentNode.querySelector('[class*="markdown"]') ||
       contentNode;
 
-    return { role, contentNode: markdownNode };
+    return { role: role || 'assistant', contentNode: markdownNode };
   }
 
   function collectMessagesFromApi(apiData, { enableCitations }) {
@@ -922,18 +1105,39 @@
   }
 
   function buildFilename(title, ext) {
-    const safeTitle = (title || 'chatgpt-export')
-      .replace(/\s+/g, ' ')
-      .replace(/[\\/:*?"<>|]+/g, '')
+    // Use document title for better file naming
+    const safeTitle = (title || document.title || 'chatgpt-export')
+      .replace(/[<>:"/\\|?*]/g, '')    // Remove invalid filename characters
+      .replace(/\s+/g, ' ')             // Normalize whitespace
       .trim();
 
-    const date = new Date().toISOString().replace(/[:.]/g, '-');
-    return `${safeTitle || 'chatgpt-export'}-${date}.${ext}`;
+    const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+    return safeTitle ? `${safeTitle} (${date}).${ext}` : `ChatGPT_Conversation_${date}.${ext}`;
   }
 
   function getChatTitle() {
-    const titleText = document.querySelector('title')?.textContent || 'ChatGPT Export';
-    return titleText.replace(/\s*-\s*ChatGPT.*/i, '').trim();
+    // Try to get actual conversation title from various locations
+    const titleSelectors = [
+      'h1:not([class*="hidden"])',
+      '[class*="conversation-title"]',
+      '[data-testid*="conversation-title"]',
+      'title'
+    ];
+
+    for (const selector of titleSelectors) {
+      const element = document.querySelector(selector);
+      if (element && element.textContent.trim()) {
+        const title = element.textContent.trim();
+        // Avoid generic titles
+        if (!['chatgpt', 'new chat', 'untitled', 'chat'].includes(title.toLowerCase())) {
+          return title.replace(/\s*-\s*ChatGPT.*/i, '').trim();
+        }
+      }
+    }
+
+    // Fallback to cleaned document title
+    const docTitle = document.querySelector('title')?.textContent || 'ChatGPT Export';
+    return docTitle.replace(/\s*-\s*ChatGPT.*/i, '').trim() || 'ChatGPT Export';
   }
 
   function buildDomJsonPayload(title, messages) {
@@ -1141,7 +1345,16 @@
         return rule ? rule.replacement(content, node) : content;
       };
 
-      return recurse(container).replace(/\n{3,}/g, '\n\n').trim();
+      let markdown = recurse(container);
+      
+      // Clean up markdown: normalize whitespace and line breaks
+      markdown = markdown
+        .replace(/\n{3,}/g, '\n\n')           // Max 2 consecutive newlines
+       .replace(/```[\s\S]*?```|`[^`]*`|\\\\/g, m => (m === '\\\\' ? '\\' : m)) // Collapse double backslashes (outside code)
+       .replace(/```[\s\S]*?```|`[^`]*`|\\([*_~])/g, (m, ch) => (ch ? ch : m))  // Unescape formatting markers (outside code; exclude backticks)
+        .trim();
+      
+      return markdown;
     }
 
     registerCitation(citation) {
