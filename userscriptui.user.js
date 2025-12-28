@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Shared UI Manager
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.24.1742
+// @version      2025.12.28.1208
 // @description  Provides a shared hotpink dock + dark modal with per-script tabs, toggles, and persistent layout for all userscripts.
 // @author       cbkii
 // @match        *://*/*
@@ -518,7 +518,7 @@
   // INITIALIZATION
   //////////////////////////////////////////////////////////////
 
-  root.__userscriptSharedUi = (() => {
+  const sharedUiFactory = (() => {
     const adapterRef = { current: null };
     let instance = null;
     return {
@@ -534,7 +534,21 @@
     };
   })();
 
+  // Expose on the root context (unsafeWindow in sandboxed scripts)
+  root.__userscriptSharedUi = sharedUiFactory;
+
+  // CRITICAL: Also expose on window when window !== root (sandbox boundary fix)
+  // This ensures scripts can discover shared UI from both contexts
+  if (typeof window !== 'undefined' && window !== root) {
+    try {
+      window.__userscriptSharedUi = sharedUiFactory;
+    } catch (_) {
+      // Ignore cross-context assignment errors
+    }
+  }
+
   // Dispatch custom event to notify other scripts that shared UI is ready
+  // Include sharedUi in event.detail for direct access
   setTimeout(() => {
     if (typeof document === 'undefined') return;
 
@@ -542,7 +556,7 @@
     try {
       if (typeof CustomEvent === 'function') {
         event = new CustomEvent('userscriptSharedUiReady', {
-          detail: { sharedUi: root.__userscriptSharedUi }
+          detail: { sharedUi: sharedUiFactory }
         });
       } else {
         event = document.createEvent('CustomEvent');
@@ -550,7 +564,7 @@
           'userscriptSharedUiReady',
           false,
           false,
-          { sharedUi: root.__userscriptSharedUi }
+          { sharedUi: sharedUiFactory }
         );
       }
     } catch (_) {

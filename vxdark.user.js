@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Router Contrast Dark Mode
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.27.1519
+// @version      2025.12.28.1213
 // @description  High-contrast dark mode for the VX230V router UI.
 // @match        http://192.168.1.1/*
 // @match        https://192.168.1.1/*
@@ -57,58 +57,62 @@
       try { await GM_setValue(key, value); } catch (_) {}
     }
   };
-  // Event-based shared UI detection to prevent race conditions
-
+  // Robust shared UI detection across sandbox boundaries
   let sharedUi = null;
-
   let sharedUiReady = false;
+  let registrationAttempted = false;
 
-
-  const initSharedUi = () => {
-
-    if (typeof window !== 'undefined' && window.__userscriptSharedUi) {
-
-      sharedUi = window.__userscriptSharedUi.getInstance({
-
-        get: (key, fallback) => gmStore.get(key, fallback),
-
-        set: (key, value) => gmStore.set(key, value)
-
-      });
-
-      sharedUiReady = true;
-
-      return true;
-
+  const initSharedUi = (providedFactory) => {
+    // Priority 1: Use factory provided in event detail
+    let factory = providedFactory;
+    
+    // Priority 2: Check window (sandboxed context)
+    if (!factory && typeof window !== 'undefined' && window.__userscriptSharedUi) {
+      factory = window.__userscriptSharedUi;
     }
-
+    
+    // Priority 3: Check unsafeWindow (page context)
+    if (!factory && typeof unsafeWindow !== 'undefined' && unsafeWindow.__userscriptSharedUi) {
+      factory = unsafeWindow.__userscriptSharedUi;
+    }
+    
+    if (factory && typeof factory.getInstance === 'function') {
+      sharedUi = factory.getInstance({
+        get: (key, fallback) => gmStore.get(key, fallback),
+        set: (key, value) => gmStore.set(key, value)
+      });
+      sharedUiReady = true;
+      return true;
+    }
     return false;
-
   };
 
-
   // Try immediate detection
-
   initSharedUi();
 
-
-  // Listen for shared UI ready event - deferred to ensure all variables are initialized
-  document.addEventListener('userscriptSharedUiReady', () => {
+  // Listen for shared UI ready event with proper detail consumption
+  document.addEventListener('userscriptSharedUiReady', (event) => {
     setTimeout(() => {
+      // Try to get factory from event detail first
+      const providedFactory = event?.detail?.sharedUi;
+      
       if (!sharedUiReady) {
-        initSharedUi();
+        initSharedUi(providedFactory);
       }
-      // Re-register if needed after shared UI becomes available
-      // Guard: ensure required variables are initialized
-      if (sharedUi && typeof state !== 'undefined' && state.enabled && 
+      
+      // Register/re-register if ready and not already done
+      if (sharedUi && typeof state !== 'undefined' && 
           typeof renderPanel === 'function' && typeof setEnabled === 'function') {
-        sharedUi.registerScript({
-          id: SCRIPT_ID,
-          title: SCRIPT_TITLE,
-          enabled: state.enabled,
-          render: renderPanel,
-          onToggle: (next) => setEnabled(next)
-        });
+        if (!registrationAttempted) {
+          registrationAttempted = true;
+          sharedUi.registerScript({
+            id: SCRIPT_ID,
+            title: SCRIPT_TITLE,
+            enabled: state.enabled,
+            render: renderPanel,
+            onToggle: (next) => setEnabled(next)
+          });
+        }
       }
     }, 0);
   });
@@ -461,7 +465,8 @@
     // INITIALIZATION
     //////////////////////////////////////////////////////////////
 
-    if (sharedUi) {
+    if (sharedUi && !registrationAttempted) {
+      registrationAttempted = true;
       sharedUi.registerScript({
         id: SCRIPT_ID,
         title: SCRIPT_TITLE,
