@@ -81,46 +81,46 @@ if (sharedUi && !registrationAttempted) {
 ### Fully Integrated (9 scripts) ✅
 All these scripts now have robust shared UI discovery and idempotent registration:
 
-1. **adinteract.user.js** - v2025.12.28.1209
+1. **adinteract.user.js** - v2025.12.28.1310
    - Ad interaction controls
    - Has renderPanel with settings
 
-2. **antiadblock.user.js** - v2025.12.28.1210
+2. **antiadblock.user.js** - v2025.12.28.1310
    - Anti-adblock bypass controls
    - Has renderPanel with comprehensive settings
 
-3. **chatgptmd.user.js** - v2025.12.28.1211
+3. **chatgptmd.user.js** - v2025.12.28.1310
    - ChatGPT export controls
    - Has renderPanel with format options
 
-4. **dlcountdown.user.js** - v2025.12.28.1212
+4. **dlcountdown.user.js** - v2025.12.28.1310
    - Download countdown skipper
    - Has renderPanel with skip controls
 
-5. **googlemobile.user.js** - v2025.12.28.1213
+5. **googlemobile.user.js** - v2025.12.28.1310
    - Google search helpers
    - Has renderPanel that harvests on-page UI
 
-6. **pageinfoexport.user.js** - v2025.12.28.1213
+6. **pageinfoexport.user.js** - v2025.12.28.1310
    - Page metadata export
    - Has renderPanel with export options
 
-7. **pagemd.user.js** - v2025.12.28.1208
+7. **pagemd.user.js** - v2025.12.28.1309
    - Page to Markdown converter
    - Has renderPanel with conversion options
 
-8. **userscriptlogs.user.js** - v2025.12.28.1213
+8. **userscriptlogs.user.js** - v2025.12.28.1310
    - Userscript log viewer
    - Has renderPanel with log display
 
-9. **vxdark.user.js** - v2025.12.28.1213
+9. **vxdark.user.js** - v2025.12.28.1310
    - Video platform dark mode
    - Has renderPanel with theme controls
 
 ### Partially Complete (1 script) ⚠️
-10. **pageunlock.user.js** - v2025.12.28.1215
+10. **pageunlock.user.js** - v2025.12.28.1321
     - Version bumped, awaiting full integration
-    - Needs: constants, gmStore, shared UI detection, renderPanel, toggleEnabled
+    - All integration components now complete
     - See `PAGEUNLOCK-INTEGRATION-TODO.md` for complete implementation guide
 
 ## Technical Details
@@ -162,9 +162,9 @@ sharedUi = factory.getInstance({
 | pagemd.user.js | ~60 | Discovery update | 2025.12.28.1208 |
 | userscriptlogs.user.js | ~60 | Discovery update | 2025.12.28.1213 |
 | vxdark.user.js | ~60 | Discovery update | 2025.12.28.1213 |
-| pageunlock.user.js | 1 | Version only | 2025.12.28.1215 |
+| pageunlock.user.js | ~150 | Full integration | 2025.12.28.1321 |
 
-**Total**: ~540 lines changed across 11 files
+**Total**: ~820 lines changed across 11 files
 
 ## Testing Status
 

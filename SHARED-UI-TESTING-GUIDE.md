@@ -14,7 +14,7 @@ This document describes how to test the shared UI framework and verify that all 
   6. googlemobile.user.js
   7. pageinfoexport.user.js
   8. pagemd.user.js
-  9. pageunlock.user.js (pending full integration)
+  9. pageunlock.user.js (fully integrated)
   10. userscriptlogs.user.js
   11. vxdark.user.js
 
@@ -132,7 +132,7 @@ The shared UI manager was exposing itself on `unsafeWindow.__userscriptSharedUi`
 
 **Expected Result**: ✅ All controls visible and functional, reload messaging clear
 
-**Status**: ⚠️ Pending - Integration not yet complete (see PAGEUNLOCK-INTEGRATION-TODO.md)
+**Status**: ✅ Complete - Full integration with all 5 toggles + 2 action buttons
 
 ### Test 7: No Duplicate Registrations
 **Goal**: Verify scripts don't register multiple times
