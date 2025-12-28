@@ -747,10 +747,10 @@
       
       const content = messageData.markdown;
       
-      // Skip if empty or too short
-      if (!content || content.trim().length < 30) {
+      // Skip only truly empty messages (avoid losing short user replies like "OK")
+      if (!content || !content.trim()) {
         if (DEBUG) {
-          log('debug', `Skipping message ${index}: too short or empty`);
+          log('debug', `Skipping message ${index}: empty`);
         }
         return;
       }
