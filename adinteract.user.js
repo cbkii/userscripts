@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ad Interaction Gate Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.28.1209
+// @version      2025.12.28.1235
 // @description  Unlocks ad interaction gates after repeated clicks with optional auto-actions.
 // @author       cbkii
 // @match        *://*/*
@@ -624,13 +624,30 @@ bootstrap().catch((err) => {
         runBtn.style.border = '1px solid rgba(255,255,255,0.16)';
         runBtn.style.background = '#1f2937';
         runBtn.style.color = '#f8fafc';
+        runBtn.style.cursor = 'pointer';
         runBtn.addEventListener('click', () => {
             if (state.enabled) {
                 start();
             }
         });
-
         wrapper.appendChild(runBtn);
+
+        const refreshBtn = document.createElement('button');
+        refreshBtn.type = 'button';
+        refreshBtn.textContent = 'Refresh ad-interaction exclusion list';
+        refreshBtn.style.padding = '8px 10px';
+        refreshBtn.style.borderRadius = '8px';
+        refreshBtn.style.border = '1px solid rgba(255,255,255,0.16)';
+        refreshBtn.style.background = '#1f2937';
+        refreshBtn.style.color = '#f8fafc';
+        refreshBtn.style.cursor = 'pointer';
+        refreshBtn.addEventListener('click', () => {
+            refreshExclusions().then(() => {
+                showToast('Exclusion list refreshed');
+            });
+        });
+        wrapper.appendChild(refreshBtn);
+
         return wrapper;
     };
 

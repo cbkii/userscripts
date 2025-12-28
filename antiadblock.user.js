@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.28.1210
+// @version      2025.12.28.1236
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @match        *://*/*
@@ -1577,6 +1577,31 @@
     info.style.fontSize = '13px';
     wrapper.appendChild(info);
 
+    const cfg = getConfig();
+    const globalToggle = document.createElement('div');
+    globalToggle.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px;';
+    
+    const toggleLabel = document.createElement('span');
+    toggleLabel.textContent = 'Global anti-adblock (all sites)';
+    toggleLabel.style.cssText = 'flex: 1; color: #cbd5e1; font-size: 13px;';
+    
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.textContent = cfg.globalEnabled ? 'ON' : 'OFF';
+    toggleBtn.style.cssText = `padding: 4px 12px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.2); cursor: pointer; font-size: 11px; font-weight: 700; ${cfg.globalEnabled ? 'background: #10b981; color: #111;' : 'background: #374151; color: #9ca3af;'}`;
+    toggleBtn.addEventListener('click', () => {
+      const newCfg = getConfig();
+      setConfig({ globalEnabled: !newCfg.globalEnabled });
+      toggleBtn.textContent = !newCfg.globalEnabled ? 'ON' : 'OFF';
+      toggleBtn.style.background = !newCfg.globalEnabled ? '#10b981' : '#374151';
+      toggleBtn.style.color = !newCfg.globalEnabled ? '#111' : '#9ca3af';
+      setTimeout(() => location.reload(), 300);
+    });
+    
+    globalToggle.appendChild(toggleLabel);
+    globalToggle.appendChild(toggleBtn);
+    wrapper.appendChild(globalToggle);
+
     const runBtn = document.createElement('button');
     runBtn.type = 'button';
     runBtn.textContent = 'Run fixes now';
@@ -1585,6 +1610,7 @@
     runBtn.style.border = '1px solid rgba(255,255,255,0.18)';
     runBtn.style.background = '#1f2937';
     runBtn.style.color = '#f8fafc';
+    runBtn.style.cursor = 'pointer';
     runBtn.addEventListener('click', () => {
       if (state.enabled) start();
     });
