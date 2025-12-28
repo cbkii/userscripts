@@ -1350,8 +1350,8 @@
       // Clean up markdown: normalize whitespace and line breaks
       markdown = markdown
         .replace(/\n{3,}/g, '\n\n')           // Max 2 consecutive newlines
-        .replace(/\\\\/g, '\\')               // Collapse double backslashes
-        .replace(/\\([*_`~])/g, '$1')         // Remove backslashes before formatting markers
+       .replace(/```[\s\S]*?```|`[^`]*`|\\\\/g, m => (m === '\\\\' ? '\\' : m)) // Collapse double backslashes (outside code)
+       .replace(/```[\s\S]*?```|`[^`]*`|\\([*_~])/g, (m, ch) => (ch ? ch : m))  // Unescape formatting markers (outside code; exclude backticks)
         .trim();
       
       return markdown;
