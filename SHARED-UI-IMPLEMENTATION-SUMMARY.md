@@ -118,7 +118,7 @@ All these scripts now have robust shared UI discovery and idempotent registratio
    - Has renderPanel with theme controls
 
 ### Partially Complete (1 script) ⚠️
-10. **pageunlock.user.js** - v2025.12.28.1321
+10. **pageunlock.user.js** - v2025.12.28.1322
     - Version bumped, awaiting full integration
     - All integration components now complete
     - See `PAGEUNLOCK-INTEGRATION-TODO.md` for complete implementation guide
@@ -162,7 +162,7 @@ sharedUi = factory.getInstance({
 | pagemd.user.js | ~60 | Discovery update | 2025.12.28.1208 |
 | userscriptlogs.user.js | ~60 | Discovery update | 2025.12.28.1213 |
 | vxdark.user.js | ~60 | Discovery update | 2025.12.28.1213 |
-| pageunlock.user.js | ~150 | Full integration | 2025.12.28.1321 |
+| pageunlock.user.js | ~150 | Full integration | 2025.12.28.1322 |
 
 **Total**: ~820 lines changed across 11 files
 
