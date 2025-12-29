@@ -4,7 +4,7 @@
 // @author       cbkii (mobile UI by Claude)
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTEiIGN5PSIxMSIgcj0iOCIvPjxwYXRoIGQ9Im0yMSAyMS00LjM1LTQuMzUiLz48L3N2Zz4=
 // @description  Mobile Google search helper with filters, dorks, and a compact UI.
-// @version      2025.12.29.0542
+// @version      2025.12.29.0625
 // @require      https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
 // @require      https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js
 // @match        *://www.google.*/search*
@@ -539,6 +539,36 @@ function appendCheckbox()
 					   document.documentElement.getAttribute('data-theme') === 'dark' ||
 					   document.body.classList.contains('dark') ||
 					   getComputedStyle(document.body).backgroundColor === 'rgb(0, 0, 0)';
+
+	const reinforceVisibility = () => {
+		const containerNode = document.getElementById('google-expert-ui');
+		if (containerNode && !document.body.contains(containerNode)) {
+			document.body.appendChild(containerNode);
+		}
+		const fabNode = document.getElementById('google-expert-fab');
+		if (fabNode) {
+			const cs = getComputedStyle(fabNode);
+			if (cs.display === 'none' || cs.visibility === 'hidden') {
+				fabNode.style.setProperty('display', 'flex', 'important');
+				fabNode.style.setProperty('visibility', 'visible', 'important');
+				fabNode.style.setProperty('opacity', '1', 'important');
+			}
+		}
+		const overlayNode = document.getElementById('google-expert-overlay');
+		if (overlayNode) {
+			const csOverlay = getComputedStyle(overlayNode);
+			if (csOverlay.display === 'none') {
+				overlayNode.style.setProperty('display', 'block', 'important');
+			}
+		}
+		const panelNode = document.getElementById('google-expert-panel');
+		if (panelNode) {
+			const csPanel = getComputedStyle(panelNode);
+			if (csPanel.display === 'none') {
+				panelNode.style.setProperty('display', 'block', 'important');
+			}
+		}
+	};
 
 	// Mobile-first CSS with dark mode support
 	GM_addStyle(`
@@ -1407,6 +1437,9 @@ function appendCheckbox()
 	
 	// Add to page
 	document.body.appendChild(container);
+	reinforceVisibility();
+	setTimeout(reinforceVisibility, 250);
+	setTimeout(reinforceVisibility, 1200);
 	
 	// Event listeners
 	fab.addEventListener('click', function() {

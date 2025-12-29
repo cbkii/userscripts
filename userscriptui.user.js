@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Shared UI Manager
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.0542
+// @version      2025.12.29.0625
 // @description  Provides a shared hotpink dock + dark modal with per-script tabs, toggles, and persistent layout for all userscripts.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHJlY3QgeD0iMyIgeT0iMyIgd2lkdGg9IjciIGhlaWdodD0iNyIvPjxyZWN0IHg9IjE0IiB5PSIzIiB3aWR0aD0iNyIgaGVpZ2h0PSI3Ii8+PHJlY3QgeD0iMTQiIHk9IjE0IiB3aWR0aD0iNyIgaGVpZ2h0PSI3Ii8+PHJlY3QgeD0iMyIgeT0iMTQiIHdpZHRoPSI3IiBoZWlnaHQ9IjciLz48L3N2Zz4=
@@ -53,10 +53,12 @@
   const STORAGE_KEY_POSITION = 'userscripts.sharedUi.position';
   const STORAGE_KEY_ACTIVE = 'userscripts.sharedUi.activePanel';
   const DEFAULT_POSITION = 'right';
-  const MODAL_ID = 'userscripts-shared-modal';
-  const BUTTON_ID = 'userscripts-shared-button';
-  const TABLIST_ID = 'userscripts-shared-tabs';
-  const PANEL_ID = 'userscripts-shared-panel';
+  const UI_PREFIX = 'userscripts-ui';
+  const MODAL_ID = `${UI_PREFIX}-modal`;
+  const BUTTON_ID = `${UI_PREFIX}-button`;
+  const TABLIST_ID = `${UI_PREFIX}-tabs`;
+  const PANEL_ID = `${UI_PREFIX}-panel`;
+  const STYLE_ID = `${UI_PREFIX}-style`;
 
   //////////////////////////////////////////////////////////////
   // UTILITIES & HELPERS
@@ -218,12 +220,12 @@
 
   let styleInjected = false;
   const injectStyle = () => {
-    if (styleInjected || SAFE_DOC.getElementById(`${BUTTON_ID}-style`)) {
+    if (styleInjected || SAFE_DOC.getElementById(STYLE_ID)) {
       styleInjected = true;
       return;
     }
     const style = SAFE_DOC.createElement('style');
-    style.id = `${BUTTON_ID}-style`;
+    style.id = STYLE_ID;
     style.textContent = css;
     (SAFE_DOC.head || SAFE_DOC.documentElement).appendChild(style);
     styleInjected = true;
@@ -274,6 +276,29 @@
       position: DEFAULT_POSITION,
       activeId: null,
       scripts: new Map()
+    };
+
+    const ensureVisible = () => {
+      if (state.button) {
+        if (!SAFE_DOC.body.contains(state.button)) {
+          SAFE_DOC.body.appendChild(state.button);
+        }
+        const btnStyle = root.getComputedStyle(state.button);
+        if (btnStyle.display === 'none' || btnStyle.visibility === 'hidden') {
+          state.button.style.setProperty('display', 'flex', 'important');
+          state.button.style.setProperty('visibility', 'visible', 'important');
+          state.button.style.setProperty('opacity', '1', 'important');
+        }
+      }
+      if (state.modal) {
+        if (!SAFE_DOC.body.contains(state.modal)) {
+          SAFE_DOC.body.appendChild(state.modal);
+        }
+        const modalStyle = root.getComputedStyle(state.modal);
+        if (modalStyle.display === 'none') {
+          state.modal.style.setProperty('display', 'flex', 'important');
+        }
+      }
     };
 
     const setPosition = async (pos) => {
@@ -367,6 +392,7 @@
 
     const toggleModal = () => {
       if (!state.modal) return;
+      ensureVisible();
       const open = !state.modal.classList.contains('open');
       state.modal.classList.toggle('open', open);
       if (state.button) {
@@ -431,6 +457,7 @@
       state.modal = modal;
       state.tabs = tabs;
       state.panel = panel;
+      ensureVisible();
       tabs.addEventListener(clickEvent, (ev) => {
         const target = ev.target.closest('.userscripts-tab');
         if (!target) return;
