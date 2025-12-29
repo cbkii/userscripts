@@ -145,6 +145,12 @@ function checkWildcardScript(filepath, meta, content) {
   );
   
   if (isWildcard) {
+    // userscriptui.user.js is the shared UI manager - it should always run
+    // to provide infrastructure for other scripts
+    if (filename === 'userscriptui.user.js') {
+      return true;
+    }
+    
     // Check for "Always Run" / dormant-by-default patterns
     // Look for ALWAYS_RUN or dormant configuration
     const hasAlwaysRunSetting = /ALWAYS_RUN|alwaysRun|always[_-]?run/i.test(content);

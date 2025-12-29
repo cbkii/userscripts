@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.28.1310
+// @version      2025.12.29.0435
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDIyczgtNCA4LTEwVjVsLTgtMy04IDN2N2MwIDYgOCAxMCA4IDEweiIvPjwvc3ZnPg==
@@ -59,6 +59,7 @@
   const SCRIPT_ID = 'antiadblock';
   const SCRIPT_TITLE = 'Anti-AdBlock Neutralizer';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+  const ALWAYS_RUN_KEY = `${SCRIPT_ID}.alwaysRun`;
 
   //////////////////////////////////////////////////////////////
   // UTILITIES & HELPERS
@@ -158,6 +159,7 @@
   const state = {
     enabled: true,
     started: false,
+    alwaysRun: false,
     menuIds: []
   };
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
@@ -1658,9 +1660,19 @@
       `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
       async () => { await setEnabled(!state.enabled); }
     ));
+    state.menuIds.push(GM_registerMenuCommand(
+      `Always Run (${state.alwaysRun ? 'ON' : 'OFF'})`,
+      async () => { await setAlwaysRun(!state.alwaysRun); }
+    ));
     if (state.enabled) {
-      state.menuIds.push(GM_registerMenuCommand('Run anti-adblock fixes', () => start()));
+      state.menuIds.push(GM_registerMenuCommand('Run anti-adblock fixes now', () => start()));
     }
+  };
+
+  const setAlwaysRun = async (value) => {
+    state.alwaysRun = !!value;
+    await gmStore.set(ALWAYS_RUN_KEY, state.alwaysRun);
+    registerMenu();
   };
 
   const stop = async () => {
@@ -1681,9 +1693,8 @@
     }
     if (!state.enabled) {
       await stop();
-    } else if (!state.started) {
-      await start();
     }
+    // Don't auto-start on enable - respect dormant-by-default
     registerMenu();
   };
 
@@ -1693,6 +1704,9 @@
 
   const init = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
+    state.alwaysRun = await gmStore.get(ALWAYS_RUN_KEY, false);
+    
+    // Register with shared UI
     if (sharedUi && !registrationAttempted) {
       registrationAttempted = true;
       sharedUi.registerScript({
@@ -1703,7 +1717,14 @@
         onToggle: (next) => setEnabled(next)
       });
     }
-    await setEnabled(state.enabled);
+    
+    // Register menu commands (always available)
+    registerMenu();
+    
+    // Only auto-start if Always Run is enabled (dormant by default)
+    if (state.enabled && state.alwaysRun) {
+      await start();
+    }
   };
 
   init().catch((err) => {
