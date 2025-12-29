@@ -278,7 +278,13 @@
   }
 
   function runForceUnlock() {
-    try { forceUnlockNow(); gmNotify('Page Unlocker: forced unlock executed'); } catch (_) {}
+    try {
+      forceUnlockNow();
+      gmNotify('Page Unlocker: forced unlock executed');
+    } catch (err) {
+      gmNotify('Page Unlocker: force unlock failed');
+      if (DEBUG) console.error(LOG_PREFIX, 'force unlock failed', err);
+    }
   }
 
   function resetSettings() {
@@ -334,7 +340,7 @@
     const panel = document.createElement('div');
     panel.style.cssText = 'padding: 12px; color: #e5e7eb; font-family: system-ui, sans-serif; font-size: 13px;';
     const title = document.createElement('h3');
-    title.textContent = 'Page Unlocker';
+    title.textContent = SCRIPT_TITLE;
     title.style.cssText = 'margin: 0 0 12px 0; font-size: 15px; font-weight: 700; color: #f8fafc;';
     panel.appendChild(title);
     const note = document.createElement('p');
