@@ -105,8 +105,6 @@
   const host = location.hostname || '';
   let isHostDisabled = cfg.disabledHosts.includes(host);
   const state = {
-    enabled: !!cfg.enabled,
-    alwaysRun: !!cfg.alwaysRun,
     menuIds: [],
   };
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
@@ -120,19 +118,27 @@
   function attemptSharedUiRegistration(tryRegister) {
     if (registrationAttempted) return;
     if (typeof tryRegister === 'function') {
-      registrationAttempted = true;
-      tryRegister(renderPanel, (next) => setEnabled(next), state.enabled);
+      try {
+        tryRegister(renderPanel, (next) => setEnabled(next), cfg.enabled);
+        registrationAttempted = true;
+      } catch (_) {
+        registrationAttempted = false;
+      }
       return;
     }
     if (sharedUi && typeof sharedUi.registerScript === 'function') {
-      registrationAttempted = true;
-      sharedUi.registerScript({
-        id: SCRIPT_ID,
-        title: SCRIPT_TITLE,
-        enabled: state.enabled,
-        render: renderPanel,
-        onToggle: (next) => setEnabled(next)
-      });
+      try {
+        sharedUi.registerScript({
+          id: SCRIPT_ID,
+          title: SCRIPT_TITLE,
+          enabled: cfg.enabled,
+          render: renderPanel,
+          onToggle: (next) => setEnabled(next)
+        });
+        registrationAttempted = true;
+      } catch (_) {
+        registrationAttempted = false;
+      }
     }
   }
 
@@ -210,22 +216,20 @@
   //////////////////////////////////////////////////////////////
 
   function setEnabled(next) {
-    state.enabled = !!next;
-    cfg.enabled = state.enabled;
+    cfg.enabled = !!next;
     gmSet(STORAGE_KEY, cfg);
     if (sharedUi) {
-      sharedUi.setScriptEnabled(SCRIPT_ID, state.enabled);
+      sharedUi.setScriptEnabled(SCRIPT_ID, cfg.enabled);
     }
     registerMenu();
     location.reload();
   }
 
   function setAlwaysRun(next) {
-    state.alwaysRun = !!next;
-    cfg.alwaysRun = state.alwaysRun;
+    cfg.alwaysRun = !!next;
     gmSet(STORAGE_KEY, cfg);
     registerMenu();
-    gmNotify(`Page Unlocker: Always Run ${state.alwaysRun ? 'enabled' : 'disabled'}. Reloading...`);
+    gmNotify(`Page Unlocker: Always Run ${cfg.alwaysRun ? 'enabled' : 'disabled'}. Reloading...`);
     location.reload();
   }
 
@@ -289,12 +293,12 @@
       state.menuIds = [];
     }
     state.menuIds.push(GM_registerMenuCommand(
-      `${MENU_PREFIX} 🔓 ${state.enabled ? '✓ Enabled' : '✗ Disabled'} (reload)`,
-      () => setEnabled(!state.enabled)
+      `${MENU_PREFIX} 🔓 ${cfg.enabled ? '✓ Enabled' : '✗ Disabled'} (reload)`,
+      () => setEnabled(!cfg.enabled)
     ));
     state.menuIds.push(GM_registerMenuCommand(
-      `${MENU_PREFIX} ↻ Always Run (${state.alwaysRun ? 'ON' : 'OFF'})`,
-      () => setAlwaysRun(!state.alwaysRun)
+      `${MENU_PREFIX} ↻ Always Run (${cfg.alwaysRun ? 'ON' : 'OFF'})`,
+      () => setAlwaysRun(!cfg.alwaysRun)
     ));
     state.menuIds.push(GM_registerMenuCommand(
       `${MENU_PREFIX} 🌐 This site (${isHostDisabled ? 'OFF' : 'ON'})`,
@@ -337,8 +341,8 @@
     note.textContent = '⚠️ Most changes reload the page to take effect.';
     note.style.cssText = 'margin: 0 0 14px 0; padding: 8px; background: rgba(251,191,36,0.15); border-left: 3px solid #fbbf24; font-size: 12px; color: #fcd34d; border-radius: 4px;';
     panel.appendChild(note);
-    const createToggle = (label, checked, onChange) => {
-      let current = !!checked;
+    const createToggle = (label, initialChecked, onChange) => {
+      let current = !!initialChecked;
       const row = document.createElement('div');
       row.style.cssText = 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px;';
       const labelEl = document.createElement('span');
@@ -371,8 +375,8 @@
       btn.addEventListener('mouseleave', () => { btn.style.background = base; });
       return btn;
     };
-    panel.appendChild(createToggle('🔓 Enable Page Unlocker (reload)', state.enabled, (val) => setEnabled(val)));
-    panel.appendChild(createToggle('↻ Always Run on all sites', state.alwaysRun, (val) => setAlwaysRun(val)));
+    panel.appendChild(createToggle('🔓 Enable Page Unlocker (reload)', cfg.enabled, (val) => setEnabled(val)));
+    panel.appendChild(createToggle('↻ Always Run on all sites', cfg.alwaysRun, (val) => setAlwaysRun(val)));
     panel.appendChild(createToggle(`🌐 Enable on this site (${host || 'unknown'})`, !isHostDisabled, (val) => toggleSite(val)));
     panel.appendChild(createToggle('🛡 Aggressive mode (blocks more events)', cfg.aggressive, (val) => toggleAggressive(val)));
     panel.appendChild(createToggle('🧹 Overlay buster (remove blockers)', cfg.overlayBuster, (val) => toggleOverlayBuster(val)));
