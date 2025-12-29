@@ -366,24 +366,31 @@
 
   const buildSearchQuery = (baseQuery) => {
     let query = baseQuery.trim();
-    const parts = [];
+    const siteParts = [];
+    const fileTypeParts = [];
+    const dorkParts = [];
     let timeFilter = null;
     let prefixOperator = null;
 
+    // Collect site filters - all selected sites should be ORed together
     Object.entries(state.selections.sites).forEach(([category, selected]) => {
       if (selected && siteFilters[category]) {
-        const sites = siteFilters[category].map(site => `site:${site}`).join(' OR ');
-        if (sites) parts.push(`(${sites})`);
+        siteFilters[category].forEach(site => {
+          siteParts.push(`site:${site}`);
+        });
       }
     });
 
+    // Collect file type filters - all selected file types should be ORed together
     Object.entries(state.selections.fileTypes).forEach(([category, selected]) => {
       if (selected && fileTypeFilters[category]) {
-        const types = fileTypeFilters[category].map(ext => `filetype:${ext}`).join(' OR ');
-        if (types) parts.push(`(${types})`);
+        fileTypeFilters[category].forEach(ext => {
+          fileTypeParts.push(`filetype:${ext}`);
+        });
       }
     });
 
+    // Collect dorks
     Object.entries(state.selections.dorks).forEach(([category, dorkSelections]) => {
       if (dorkSelections && typeof dorkSelections === 'object') {
         Object.entries(dorkSelections).forEach(([dorkLabel, selected]) => {
@@ -397,7 +404,7 @@
                 } else if (dorkItem.isPrefix) {
                   prefixOperator = dorkItem.dork;
                 } else {
-                  parts.push(dorkItem.dork);
+                  dorkParts.push(dorkItem.dork);
                 }
               }
             }
@@ -406,11 +413,32 @@
       }
     });
 
+    // Build query parts
+    const queryParts = [];
+
+    // Sites: combine all with OR, wrap in parentheses
+    if (siteParts.length > 0) {
+      queryParts.push(`(${siteParts.join(' OR ')})`);
+    }
+
+    // File types: combine all with OR, wrap in parentheses
+    if (fileTypeParts.length > 0) {
+      queryParts.push(`(${fileTypeParts.join(' OR ')})`);
+    }
+
+    // Dorks: add each as separate term (they typically include their own operators)
+    dorkParts.forEach(dork => {
+      queryParts.push(dork);
+    });
+
+    // Apply prefix operator if any
     if (prefixOperator) {
       query = prefixOperator + query;
     }
-    if (parts.length > 0) {
-      query = query + ' ' + parts.join(' ');
+
+    // Combine query with filter parts (space = AND in Google)
+    if (queryParts.length > 0) {
+      query = query + ' ' + queryParts.join(' ');
     }
 
     return { query: query.trim(), timeFilter };
