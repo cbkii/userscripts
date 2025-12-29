@@ -118,9 +118,10 @@ This is the **canonical scaffold** for all userscripts in this repo. Apply it to
 
 - **Do NOT `@require` the shared UI** - it must be installed separately as a userscript. Scripts detect it via `window.__userscriptSharedUi`.
 - Register via `registerScript({ id, title, enabled, render, onToggle })` when `sharedUi` is available.
-- Shared UI is a scaffold only; **each script must remain fully functional without it** (fallback buttons/overlays + menu commands).
-- Fallbacks: if the shared UI is not present, inject the legacy UI (floating button/panel) with **the same dark + hotpink styling** and keep menu commands working.
-- UI content must be touch-friendly, dark-themed, and idempotent; remove injected nodes on teardown.
+- **NO FALLBACK UI**: Scripts must NOT create standalone buttons, overlays, or panels. The shared UI modal is the ONLY permitted user interface.
+- **NO STANDALONE UI ELEMENTS**: Do not create FABs, custom overlays, sidebar panels, or any DOM elements outside of `renderPanel()`.
+- Menu commands are the ONLY fallback when shared UI is unavailable - they provide basic functionality without visual clutter.
+- UI content must be touch-friendly, dark-themed, and idempotent.
 
 ## Userscript logs (`userscriptlogs.user.js`)
 
