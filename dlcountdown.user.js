@@ -146,10 +146,6 @@
         }, 0);
       });
     }
-          }
-        }
-      }, 0);
-    });
     const state = {
         enabled: true,
         started: false,
@@ -169,7 +165,7 @@
                 /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
                 '$1$2=[redacted]'
             );
-            if (/^https?:\\/\\//i.test(text)) {
+            if (/^https?:\/\//i.test(text)) {
                 try {
                     const url = new URL(text);
                     text = `${url.origin}${url.pathname}`;

@@ -166,10 +166,6 @@
       }, 0);
     });
   }
-        }
-      }
-    }, 0);
-  });
   const state = {
     enabled: true,
     started: false,
