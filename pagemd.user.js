@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.0842
+// @version      2025.12.29.1958
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PHBhdGggZD0iTTEwIDEzaDQiLz48cGF0aCBkPSJNMTAgMTdoNCIvPjxwYXRoIGQ9Ik0xMCA5aDIiLz48L3N2Zz4=
@@ -20,8 +20,8 @@
 // @grant        GM_setValue
 // @grant        GM_download
 // @require      https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/Readability.js
-// @require      https://cdn.jsdelivr.net/npm/turndown@7.2.2/lib/turndown.browser.cjs.min.js
-// @require      https://cdn.jsdelivr.net/npm/turndown-plugin-gfm@1.0.2/dist/turndown-plugin-gfm.min.js
+// @require      https://unpkg.com/turndown@7.2.2/dist/turndown.js
+// @require      https://unpkg.com/turndown-plugin-gfm@1.0.2/dist/turndown-plugin-gfm.js
 // @license      AGPL-3.0
 // ==/UserScript==
 
