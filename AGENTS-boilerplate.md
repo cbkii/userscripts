@@ -11,6 +11,7 @@ This is the **canonical scaffold** for all userscripts in this repo. Apply it to
 // @version      YYYY.MM.DD.HHMM        // UTC datetime, bump on each functional change
 // @description  <Concise purpose + key features>
 // @author       cbkii
+// @icon         data:image/svg+xml;base64,<base64-encoded-pink-svg>
 // @match        <narrow patterns>
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/<file>.user.js
 // @downloadURL  https://raw.githubusercontent.com/cbkii/userscripts/main/<file>.user.js
@@ -41,6 +42,12 @@ This is the **canonical scaffold** for all userscripts in this repo. Apply it to
 - Keep `@match`/`@include` as tight as possible.
 - Only declare grants you use; prefer async GM APIs when present.
 - Use a single top-level IIFE with `"use strict"` and a named `main()` entry.
+- **Icon requirement**: Every userscript must include an `@icon` metadata field with a simple, consistent line-style SVG icon:
+  - Use hot pink (`#FF1493`) stroke color for consistency across all scripts
+  - Must be a base64-encoded data URI (format: `data:image/svg+xml;base64,<encoded-svg>`)
+  - Choose imagery relevant to the script's purpose (e.g., shield for security, download for export, unlock for access)
+  - Keep icons lightweight and from the same visual design set/style for consistency
+  - Position `@icon` after `@author` and before `@match` in the metadata block
 
 ## Standard code scaffold (recommended)
 

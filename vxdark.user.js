@@ -4,6 +4,7 @@
 // @version      2025.12.28.1614
 // @description  High-contrast dark mode for the VX230V router UI.
 // @author       cbkii
+// @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTIxIDEyLjc5QTkgOSAwIDEgMSAxMS4yMSAzIDcgNyAwIDAgMCAyMSAxMi43OXoiLz48L3N2Zz4=
 // @match        http://192.168.1.1/*
 // @match        https://192.168.1.1/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/vxdark.user.js
