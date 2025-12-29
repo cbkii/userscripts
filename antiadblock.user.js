@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.0435
+// @version      2025.12.29.0542
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDIyczgtNCA4LTEwVjVsLTgtMy04IDN2N2MwIDYgOCAxMCA4IDEweiIvPjwvc3ZnPg==
@@ -160,7 +160,13 @@
     enabled: true,
     started: false,
     alwaysRun: false,
-    menuIds: []
+    menuIds: [],
+    // Resource tracking for cleanup
+    resources: {
+      intervals: [],
+      timeouts: [],
+      injectedNodes: []
+    }
   };
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
@@ -1677,6 +1683,24 @@
 
   const stop = async () => {
     state.started = false;
+    // Clean up resources
+    if (state.resources) {
+      state.resources.intervals.forEach(id => { try { clearInterval(id); } catch (_) {} });
+      state.resources.intervals = [];
+      state.resources.timeouts.forEach(id => { try { clearTimeout(id); } catch (_) {} });
+      state.resources.timeouts = [];
+      state.resources.injectedNodes.forEach(node => { try { node.remove(); } catch (_) {} });
+      state.resources.injectedNodes = [];
+    }
+    // Remove injected UI elements
+    try {
+      const btn = document.getElementById('uAAB-btn');
+      if (btn) btn.remove();
+      const panel = document.getElementById('uAAB-panel');
+      if (panel) panel.remove();
+      const backdrop = document.getElementById('uAAB-backdrop');
+      if (backdrop) backdrop.remove();
+    } catch (_) {}
   };
 
   const start = async () => {

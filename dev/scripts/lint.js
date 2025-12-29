@@ -116,15 +116,24 @@ function checkDependencies(filepath, meta, content) {
   
   for (const url of requires) {
     // Check for non-canonical CDN URLs
-    let isCanonical = false;
-    for (const [lib, canonical] of Object.entries(CANONICAL_CDNS)) {
-      if (url.includes(lib)) {
+    // Sort by key length descending to match longer keys first (e.g., 'turndown-plugin-gfm' before 'turndown')
+    const sortedEntries = Object.entries(CANONICAL_CDNS).sort((a, b) => b[0].length - a[0].length);
+    
+    for (const [lib, canonical] of sortedEntries) {
+      // Only match if the URL starts with the canonical URL
+      if (url.startsWith(canonical)) {
+        usedLibraries.set(lib, url);
+        break;
+      }
+      // Also match by library name in URL path (but exclude false matches)
+      const urlLower = url.toLowerCase();
+      // Check if the library name appears in the URL and it doesn't start with canonical
+      if (urlLower.includes(`/${lib}`) || urlLower.includes(`/${lib}@`) || urlLower.includes(`/${lib}.`)) {
         if (!url.startsWith(canonical)) {
           log('warn', filename, `Non-canonical CDN for ${lib}: ${url}`);
           log('warn', filename, `  Expected: ${canonical}*`);
         }
         usedLibraries.set(lib, url);
-        isCanonical = true;
         break;
       }
     }

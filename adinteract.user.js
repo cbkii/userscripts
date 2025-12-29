@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ad Interaction Gate Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.0435
+// @version      2025.12.29.0542
 // @description  Unlocks ad interaction gates after repeated clicks with optional auto-actions.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTMgM2w3LjA3IDE2Ljk3IDIuNTEtNy4zOSA3LjM5LTIuNTFMMyAzeiIvPjxwYXRoIGQ9Ik0xMyAxM2w2IDYiLz48L3N2Zz4=
@@ -155,7 +155,12 @@
         enabled: true,
         started: false,
         alwaysRun: false,
-        menuIds: []
+        menuIds: [],
+        // Resource tracking for cleanup
+        resources: {
+            eventListeners: [],
+            injectedNodes: []
+        }
     };
     const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
@@ -712,6 +717,15 @@ bootstrap().catch((err) => {
 
     const stop = async () => {
         state.started = false;
+        // Clean up resources
+        if (state.resources) {
+            state.resources.eventListeners.forEach(({ target, type, handler, options }) => {
+                try { target.removeEventListener(type, handler, options); } catch (_) {}
+            });
+            state.resources.eventListeners = [];
+            state.resources.injectedNodes.forEach(node => { try { node.remove(); } catch (_) {} });
+            state.resources.injectedNodes = [];
+        }
     };
 
     const start = async () => {
