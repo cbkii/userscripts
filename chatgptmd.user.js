@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.0542
-// @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions.
+// @version      2025.12.29.0657
+// @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions. UI integrated with shared userscript panel.
 // @author       cbcoz
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTIxIDE1djRhMiAyIDAgMCAxLTIgMkg1YTIgMiAwIDAgMS0yLTJ2LTQiLz48cG9seWxpbmUgcG9pbnRzPSI3IDEwIDEyIDE1IDE3IDEwIi8+PGxpbmUgeDE9IjEyIiB5MT0iMTUiIHgyPSIxMiIgeTI9IjMiLz48L3N2Zz4=
 // @match        *://chat.openai.com/*
@@ -23,23 +23,25 @@
 
 /*
   Feature summary:
-  - Adds export buttons to save ChatGPT chats as Markdown, JSON, or plain text.
+  - Exports ChatGPT conversations to Markdown, JSON, or plain text.
   - Enhanced message detection with robust DOM selectors and validation.
   - Improved sender identification using multiple detection methods.
   - Automatic duplicate removal and sender sequence correction.
   - Supports robust DOM selectors and an optional API export mode.
   - Includes clipboard copy and Android share-sheet fallbacks.
   - Formats Deep Research citations as Markdown footnotes when detected.
+  - UI fully integrated into the shared userscript panel (requires userscriptui.user.js).
 
   How it works:
-  - Injects export controls near the input area and watches for SPA navigation.
+  - Registers with the shared UI manager to provide export controls in the unified panel.
   - Collects messages from the DOM using multiple selector strategies with content validation.
   - Identifies senders (User vs ChatGPT) using data attributes, avatars, content analysis, and structural heuristics.
   - Removes duplicates via content hashing and fixes consecutive same-sender messages.
   - Converts HTML to clean Markdown and downloads, copies, or shares the generated export.
 
   Configuration:
-  - Toggle API export or citation formatting in the export popup.
+  - Toggle API export or citation formatting in the shared UI panel.
+  - Use "Quick export (.md)" menu command for fast markdown downloads.
   - Set DEBUG to true for detailed console logging.
 */
 
@@ -52,8 +54,6 @@
 
   const DEBUG = false;
   const LOG_PREFIX = '[cgpt]';
-  const BUTTONS_ID = 'exporter-buttons';
-  const POPUP_ID = 'export-popup';
   const STATE = {
     apiMode: false,
     citations: true
@@ -169,9 +169,7 @@
   const state = {
     enabled: true,
     started: false,
-    menuIds: [],
-    observers: [],
-    historyPatched: false
+    menuIds: []
   };
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
@@ -262,147 +260,108 @@
   // CORE LOGIC - CHATGPT EXPORT
   //////////////////////////////////////////////////////////////
 
+  // Note: Legacy standalone UI has been removed. This script now requires
+  // userscriptui.user.js to be installed. All UI is contained in the shared panel.
+  
+  const start = async () => {
+    if (state.started) return;
+    state.started = true;
+    log('debug', 'Script started');
+  };
+
+  const stop = async () => {
+    if (!state.started) return;
+    state.started = false;
+    log('debug', 'Script stopped');
+  };
+
+  //////////////////////////////////////////////////////////////
+  // STATE MANAGEMENT
+  //////////////////////////////////////////////////////////////
+
+  const registerMenu = () => {
+    if (typeof GM_registerMenuCommand !== 'function') return;
+    if (hasUnregister && state.menuIds.length) {
+      state.menuIds.forEach((id) => {
+        try { GM_unregisterMenuCommand(id); } catch (_) {}
+      });
+      state.menuIds = [];
+    }
+    state.menuIds.push(GM_registerMenuCommand(
+      `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+      async () => { await setEnabled(!state.enabled); }
+    ));
+    if (state.enabled) {
+      state.menuIds.push(GM_registerMenuCommand('Quick export (.md)', () => exportChat({ format: 'md', action: 'download' })));
+    }
+  };
+
+  const setEnabled = async (value) => {
+    state.enabled = !!value;
+    await gmStore.set(ENABLE_KEY, state.enabled);
+    if (sharedUi) {
+      sharedUi.setScriptEnabled(SCRIPT_ID, state.enabled);
+    }
+    if (!state.enabled) {
+      await stop();
+    } else {
+      await start();
+    }
+    registerMenu();
+  };
+
+  //////////////////////////////////////////////////////////////
+  // UI COMPONENTS
+  //////////////////////////////////////////////////////////////
+
+  const renderPanel = () => {
+    const wrapper = document.createElement('div');
+    wrapper.style.display = 'flex';
+    wrapper.style.flexDirection = 'column';
+    wrapper.style.gap = '10px';
+
+    const header = document.createElement('div');
+    header.textContent = 'Export ChatGPT conversation';
+    header.style.fontSize = '13px';
+    header.style.color = '#e5e7eb';
+    wrapper.appendChild(header);
+
+    const optionsRow = document.createElement('div');
+    optionsRow.style.display = 'flex';
+    optionsRow.style.flexDirection = 'column';
+    optionsRow.style.gap = '8px';
+    optionsRow.appendChild(buildToggle({
+      id: 'export-api-toggle',
+      label: 'Full export (API mode)',
+      checked: STATE.apiMode,
+      onChange: (checked) => { STATE.apiMode = checked; }
+    }));
+    optionsRow.appendChild(buildToggle({
+      id: 'export-citation-toggle',
+      label: 'Format citations as footnotes',
+      checked: STATE.citations,
+      onChange: (checked) => { STATE.citations = checked; }
+    }));
+    wrapper.appendChild(optionsRow);
+
+    const buttonGroup = document.createElement('div');
+    buttonGroup.style.display = 'flex';
+    buttonGroup.style.flexDirection = 'column';
+    buttonGroup.style.gap = '8px';
+    buttonGroup.appendChild(buildActionRow('Markdown (.md)', 'md'));
+    buttonGroup.appendChild(buildActionRow('Plain Text (.txt)', 'txt'));
+    buttonGroup.appendChild(buildActionRow('JSON (.json)', 'json'));
+    wrapper.appendChild(buttonGroup);
+
+    return wrapper;
+  };
+
+  //////////////////////////////////////////////////////////////
+  // INITIALIZATION
+  //////////////////////////////////////////////////////////////
+
   async function main() {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
-
-    const ensureButtons = () => {
-      if (document.getElementById(BUTTONS_ID)) return;
-      const inputWrapper = findInputWrapper();
-      if (inputWrapper) {
-        injectButtons(inputWrapper);
-      }
-    };
-
-    const observeUiChanges = () => {
-      let debounceId = 0;
-      const observer = new MutationObserver(() => {
-        if (document.getElementById(BUTTONS_ID)) return;
-        if (debounceId) return;
-        debounceId = window.setTimeout(() => {
-          debounceId = 0;
-          ensureButtons();
-        }, 250);
-      });
-      observer.observe(document.documentElement, { childList: true, subtree: true });
-      state.observers.push(observer);
-    };
-
-    const wrapHistory = (method) => {
-      const original = history[method];
-      if (!original || state.historyPatched) return;
-      history[method] = function (...args) {
-        const result = original.apply(this, args);
-        ensureButtons();
-        return result;
-      };
-      state.historyPatched = true;
-    };
-
-    const teardownLegacyUi = () => {
-      document.getElementById(BUTTONS_ID)?.remove();
-      document.getElementById(POPUP_ID)?.remove();
-      state.observers.forEach((obs) => { try { obs.disconnect(); } catch (_) {} });
-      state.observers = [];
-    };
-
-    const start = async () => {
-      if (state.started) return;
-      state.started = true;
-      if (!sharedUi) {
-        wrapHistory('pushState');
-        wrapHistory('replaceState');
-        window.addEventListener('popstate', ensureButtons);
-        observeUiChanges();
-        ensureButtons();
-      }
-    };
-
-    const stop = async () => {
-      if (!state.started) return;
-      state.started = false;
-      teardownLegacyUi();
-    };
-
-    //////////////////////////////////////////////////////////////
-    // STATE MANAGEMENT
-    //////////////////////////////////////////////////////////////
-
-    const registerMenu = () => {
-      if (typeof GM_registerMenuCommand !== 'function') return;
-      if (hasUnregister && state.menuIds.length) {
-        state.menuIds.forEach((id) => {
-          try { GM_unregisterMenuCommand(id); } catch (_) {}
-        });
-        state.menuIds = [];
-      }
-      state.menuIds.push(GM_registerMenuCommand(
-        `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
-        async () => { await setEnabled(!state.enabled); }
-      ));
-      if (state.enabled) {
-        state.menuIds.push(GM_registerMenuCommand('Quick export (.md)', () => exportChat({ format: 'md', action: 'download' })));
-      }
-    };
-
-    const setEnabled = async (value) => {
-      state.enabled = !!value;
-      await gmStore.set(ENABLE_KEY, state.enabled);
-      if (sharedUi) {
-        sharedUi.setScriptEnabled(SCRIPT_ID, state.enabled);
-      }
-      if (!state.enabled) {
-        await stop();
-      } else {
-        await start();
-      }
-      registerMenu();
-    };
-
-    //////////////////////////////////////////////////////////////
-    // UI COMPONENTS
-    //////////////////////////////////////////////////////////////
-
-    const renderPanel = () => {
-      const wrapper = document.createElement('div');
-      wrapper.style.display = 'flex';
-      wrapper.style.flexDirection = 'column';
-      wrapper.style.gap = '10px';
-
-      const header = document.createElement('div');
-      header.textContent = 'Export ChatGPT conversation';
-      header.style.fontSize = '13px';
-      header.style.color = '#e5e7eb';
-      wrapper.appendChild(header);
-
-      const optionsRow = document.createElement('div');
-      optionsRow.style.display = 'flex';
-      optionsRow.style.flexDirection = 'column';
-      optionsRow.style.gap = '8px';
-      optionsRow.appendChild(buildToggle({
-        id: 'export-api-toggle',
-        label: 'Full export (API mode)',
-        checked: STATE.apiMode,
-        onChange: (checked) => { STATE.apiMode = checked; }
-      }));
-      optionsRow.appendChild(buildToggle({
-        id: 'export-citation-toggle',
-        label: 'Format citations as footnotes',
-        checked: STATE.citations,
-        onChange: (checked) => { STATE.citations = checked; }
-      }));
-      wrapper.appendChild(optionsRow);
-
-      const buttonGroup = document.createElement('div');
-      buttonGroup.style.display = 'flex';
-      buttonGroup.style.flexDirection = 'column';
-      buttonGroup.style.gap = '8px';
-      buttonGroup.appendChild(buildActionRow('Markdown (.md)', 'md'));
-      buttonGroup.appendChild(buildActionRow('Plain Text (.txt)', 'txt'));
-      buttonGroup.appendChild(buildActionRow('JSON (.json)', 'json'));
-      wrapper.appendChild(buttonGroup);
-
-      return wrapper;
-    };
 
     if (sharedUi && !registrationAttempted) {
       registrationAttempted = true;
@@ -477,164 +436,6 @@
       'cursor: pointer',
       'font-weight: 600'
     ].join(';');
-  }
-
-  function legacyButtonStyle() {
-    return [
-      'padding: 9px 13px',
-      'font-size: 13px',
-      'border-radius: 10px',
-      'border: 1px solid #ff70c6',
-      'background: linear-gradient(145deg,#0f0f17,#16162a)',
-      'color: #f8fafc',
-      'cursor: pointer',
-      'font-weight: 700',
-      'letter-spacing: 0.01em',
-      'box-shadow: 0 10px 22px rgba(0,0,0,0.45)'
-    ].join(';');
-  }
-
-  function findInputWrapper() {
-    return document.querySelector('form')?.parentElement || null;
-  }
-
-  function injectButtons(container) {
-    if (sharedUi) return; // shared UI handles controls
-    if (document.getElementById(BUTTONS_ID)) return;
-    const wrapper = document.createElement('div');
-    wrapper.id = BUTTONS_ID;
-    wrapper.dataset.chatgptExporter = '1';
-    wrapper.style.cssText =
-      'margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-start;z-index:9999;' +
-      'background:#0d1324;padding:10px;border:1px solid #ff69b4;border-radius:12px;box-shadow:0 14px 30px rgba(0,0,0,0.45);';
-
-    const quickBtn = document.createElement('button');
-    quickBtn.type = 'button';
-    quickBtn.innerText = '⬇️ Quick Export (.md)';
-    quickBtn.style.cssText = legacyButtonStyle();
-    quickBtn.addEventListener('click', () => {
-      void exportChat({ format: 'md', action: 'download' });
-    });
-
-    const moreBtn = document.createElement('button');
-    moreBtn.type = 'button';
-    moreBtn.innerText = '⚙️ More Options';
-    moreBtn.style.cssText = legacyButtonStyle();
-    moreBtn.addEventListener('click', showOptionsDialog);
-
-    wrapper.appendChild(quickBtn);
-    wrapper.appendChild(moreBtn);
-
-    if (container === document.body) {
-      container.insertBefore(wrapper, container.firstChild);
-    } else {
-      container.appendChild(wrapper);
-    }
-  }
-
-  function showOptionsDialog() {
-    if (sharedUi) {
-      sharedUi.switchPanel(SCRIPT_ID);
-      sharedUi.toggleModal();
-      return;
-    }
-    if (document.getElementById(POPUP_ID)) return;
-
-    const popup = document.createElement('div');
-    popup.id = POPUP_ID;
-    popup.dataset.chatgptExporter = '1';
-    popup.style.cssText = [
-      'position: fixed',
-      'bottom: 90px',
-      'left: 8%',
-      'right: 8%',
-      'background: linear-gradient(160deg,#0b0b12,#121226)',
-      'border: 1px solid #ff70c6',
-      'border-radius: 12px',
-      'padding: 16px',
-      'z-index: 9999',
-      'box-shadow: 0 16px 34px rgba(0,0,0,0.5)',
-      'font-size: 16px',
-      'text-align: center'
-    ].join(';');
-
-    const title = document.createElement('div');
-    title.textContent = '📤 Export Chat As';
-    title.style.cssText = 'margin-bottom: 12px; font-weight: 700; color:#f8fafc;';
-
-    const optionsRow = document.createElement('div');
-    optionsRow.style.cssText = 'display:flex;flex-direction:column;gap:8px;align-items:flex-start;margin-bottom:12px;color:#e5e7eb;';
-
-    const apiToggle = buildToggle({
-      id: 'export-api-toggle',
-      label: 'Full export (API mode)',
-      checked: STATE.apiMode,
-      onChange: checked => {
-        STATE.apiMode = checked;
-      }
-    });
-
-    const citationToggle = buildToggle({
-      id: 'export-citation-toggle',
-      label: 'Format citations as footnotes',
-      checked: STATE.citations,
-      onChange: checked => {
-        STATE.citations = checked;
-      }
-    });
-
-    optionsRow.appendChild(apiToggle);
-    optionsRow.appendChild(citationToggle);
-
-    const buttonGroup = document.createElement('div');
-    buttonGroup.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
-
-    buttonGroup.appendChild(buildActionRow('Markdown (.md)', 'md'));
-    buttonGroup.appendChild(buildActionRow('Plain Text (.txt)', 'txt'));
-    buttonGroup.appendChild(buildActionRow('JSON (.json)', 'json'));
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.textContent = '❌ Cancel';
-    cancelBtn.style.cssText = `${legacyButtonStyle()};background:#1b2436;color:#f8fafc;margin-top:12px;`;
-
-    popup.appendChild(title);
-    popup.appendChild(optionsRow);
-    popup.appendChild(buttonGroup);
-    popup.appendChild(cancelBtn);
-
-    document.body.appendChild(popup);
-
-    let observer = null;
-    const cleanup = () => {
-      document.removeEventListener('keydown', escapeHandler);
-      if (observer) observer.disconnect();
-      observer = null;
-    };
-
-    const removePopup = () => {
-      if (popup.parentNode) {
-        popup.remove();
-      }
-      cleanup();
-    };
-
-    popup.addEventListener('click', (ev) => {
-      if (ev.target === popup) removePopup();
-    });
-    const escapeHandler = (e) => {
-      if (e.key === 'Escape') {
-        removePopup();
-      }
-    };
-    document.addEventListener('keydown', escapeHandler);
-    observer = new MutationObserver(() => {
-      if (!popup.isConnected) {
-        cleanup();
-      }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-    cancelBtn.addEventListener('click', () => removePopup());
   }
 
   async function exportChat({ format, action }) {
