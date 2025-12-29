@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.0542
+// @version      2025.12.29.0725
 // @description  Accelerates download countdown timers and enables download controls.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cG9seWxpbmUgcG9pbnRzPSIxMiA2IDEyIDEyIDE2IDE0Ii8+PC9zdmc+
@@ -847,11 +847,11 @@
             return;
         }
         state.menuIds.push(GM_registerMenuCommand(
-            `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+            `[Download Countdown] ${state.enabled ? '✓' : '✗'} Enable`,
             async () => { await setEnabled(!state.enabled); }
         ));
         if (state.enabled) {
-            state.menuIds.push(GM_registerMenuCommand('Rescan timers', () => {
+            state.menuIds.push(GM_registerMenuCommand('[Download Countdown] ⟳ Rescan timers', () => {
                 utils.findAndAccelerateTimerElements();
                 timerAccelerator.accelerateGlobalTimers();
                 timerAccelerator.handleCommonPatterns();

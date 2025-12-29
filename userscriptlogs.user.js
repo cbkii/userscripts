@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Log Viewer
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.0721
+// @version      2025.12.29.0725
 // @description  View and clear stored userscript logs from a simple on-page dialog.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGxpbmUgeDE9IjgiIHkxPSI2IiB4Mj0iMjEiIHkyPSI2Ii8+PGxpbmUgeDE9IjgiIHkxPSIxMiIgeDI9IjIxIiB5Mj0iMTIiLz48bGluZSB4MT0iOCIgeTE9IjE4IiB4Mj0iMjEiIHkyPSIxOCIvPjxsaW5lIHgxPSIzIiB5MT0iNiIgeDI9IjMuMDEiIHkyPSI2Ii8+PGxpbmUgeDE9IjMiIHkxPSIxMiIgeDI9IjMuMDEiIHkyPSIxMiIvPjxsaW5lIHgxPSIzIiB5MT0iMTgiIHgyPSIzLjAxIiB5Mj0iMTgiLz48L3N2Zz4=
@@ -556,11 +556,11 @@
       state.menuIds = [];
     }
     state.menuIds.push(GM_registerMenuCommand(
-      `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+      `[Logs] ${state.enabled ? '✓' : '✗'} Enable`,
       async () => { await setEnabled(!state.enabled); }
     ));
     if (state.enabled) {
-      state.menuIds.push(GM_registerMenuCommand('Open log viewer', () => {
+      state.menuIds.push(GM_registerMenuCommand('[Logs] 👁 Open log viewer', () => {
         if (sharedUi) {
           sharedUi.switchPanel(SCRIPT_ID);
           sharedUi.toggleModal();
@@ -568,7 +568,7 @@
           renderFallbackModal();
         }
       }));
-      state.menuIds.push(GM_registerMenuCommand('Clear stored logs', () => clearLogs()));
+      state.menuIds.push(GM_registerMenuCommand('[Logs] 🗑 Clear stored logs', () => clearLogs()));
     }
   };
 

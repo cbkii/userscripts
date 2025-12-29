@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.0542
+// @version      2025.12.29.0725
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDIyczgtNCA4LTEwVjVsLTgtMy04IDN2N2MwIDYgOCAxMCA4IDEweiIvPjwvc3ZnPg==
@@ -1663,15 +1663,15 @@
     }
     if (!hasUnregister && state.menuIds.length) return;
     state.menuIds.push(GM_registerMenuCommand(
-      `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+      `[Anti-Adblock] ${state.enabled ? '✓' : '✗'} Enable`,
       async () => { await setEnabled(!state.enabled); }
     ));
     state.menuIds.push(GM_registerMenuCommand(
-      `Always Run (${state.alwaysRun ? 'ON' : 'OFF'})`,
+      `[Anti-Adblock] ↻ Always Run (${state.alwaysRun ? 'ON' : 'OFF'})`,
       async () => { await setAlwaysRun(!state.alwaysRun); }
     ));
     if (state.enabled) {
-      state.menuIds.push(GM_registerMenuCommand('Run anti-adblock fixes now', () => start()));
+      state.menuIds.push(GM_registerMenuCommand('[Anti-Adblock] ▶ Run fixes now', () => start()));
     }
   };
 
