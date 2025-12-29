@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.0542
+// @version      2025.12.29.2003
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PHBhdGggZD0iTTEwIDEzaDQiLz48cGF0aCBkPSJNMTAgMTdoNCIvPjxwYXRoIGQ9Ik0xMCA5aDIiLz48L3N2Zz4=
@@ -20,8 +20,8 @@
 // @grant        GM_setValue
 // @grant        GM_download
 // @require      https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/Readability.js
-// @require      https://cdn.jsdelivr.net/npm/turndown@7.2.2/lib/turndown.browser.cjs.min.js
-// @require      https://cdn.jsdelivr.net/npm/turndown-plugin-gfm@1.0.2/dist/turndown-plugin-gfm.min.js
+// @require      https://unpkg.com/turndown@7.2.2/dist/turndown.js
+// @require      https://unpkg.com/turndown-plugin-gfm@1.0.2/dist/turndown-plugin-gfm.js
 // @license      AGPL-3.0
 // ==/UserScript==
 
@@ -56,8 +56,6 @@
   const SCRIPT_TITLE = 'Page ➜ Markdown';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
   const ALWAYS_RUN_KEY = `${SCRIPT_ID}.alwaysRun`;
-  const FALLBACK_BUTTON_ID = 'pagemd-convert-button';
-  const FALLBACK_BUTTON_TEXT = 'Page → Markdown';
   const DEFAULT_FILENAME = 'page.md';
   const POST_IDLE_DELAY_MS = 350;
 
@@ -742,6 +740,7 @@
   const state = {
     enabled: true,
     started: false,
+    alwaysRun: false,
     menuIds: []
   };
 
@@ -796,7 +795,37 @@
     description.style.margin = '0';
     description.style.fontSize = '13px';
     description.style.lineHeight = '1.4';
+    description.style.color = '#cbd5e1';
     wrapper.appendChild(description);
+
+    // Always Run toggle
+    const alwaysRunRow = document.createElement('div');
+    alwaysRunRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px;';
+    
+    const alwaysRunLabel = document.createElement('span');
+    alwaysRunLabel.textContent = '↻ Always Run (auto-convert on all pages)';
+    alwaysRunLabel.style.cssText = 'flex: 1; color: #cbd5e1; font-size: 13px;';
+    
+    const alwaysRunBtn = document.createElement('button');
+    alwaysRunBtn.type = 'button';
+    alwaysRunBtn.textContent = state.alwaysRun ? 'ON' : 'OFF';
+    alwaysRunBtn.style.cssText = `padding: 4px 12px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.2); cursor: pointer; font-size: 11px; font-weight: 700; ${state.alwaysRun ? 'background: #10b981; color: #111;' : 'background: #374151; color: #9ca3af;'}`;
+    alwaysRunBtn.addEventListener('click', async () => {
+      await setAlwaysRun(!state.alwaysRun);
+      alwaysRunBtn.textContent = state.alwaysRun ? 'ON' : 'OFF';
+      alwaysRunBtn.style.background = state.alwaysRun ? '#10b981' : '#374151';
+      alwaysRunBtn.style.color = state.alwaysRun ? '#111' : '#9ca3af';
+    });
+    
+    alwaysRunRow.appendChild(alwaysRunLabel);
+    alwaysRunRow.appendChild(alwaysRunBtn);
+    wrapper.appendChild(alwaysRunRow);
+
+    // Status indicator
+    const status = document.createElement('div');
+    status.textContent = state.alwaysRun ? 'Active: Auto-converting pages' : 'Dormant: Use buttons below to convert on-demand';
+    status.style.cssText = 'font-size: 12px; color: #94a3b8; font-style: italic;';
+    wrapper.appendChild(status);
 
     const buttonsRow = document.createElement('div');
     buttonsRow.style.display = 'flex';
@@ -807,12 +836,13 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = label;
-      btn.style.padding = '8px 10px';
-      btn.style.borderRadius = '8px';
-      btn.style.border = '1px solid rgba(255,255,255,0.16)';
+      btn.style.padding = '8px 12px';
+      btn.style.borderRadius = '6px';
+      btn.style.border = '1px solid rgba(255,255,255,0.18)';
       btn.style.background = '#1f2937';
       btn.style.color = '#f8fafc';
       btn.style.cursor = 'pointer';
+      btn.style.fontSize = '13px';
       btn.addEventListener('click', () => handleConvert(opts));
       return btn;
     };
@@ -832,8 +862,6 @@
     state.started = false;
     const toast = document.getElementById('pagemd-toast');
     if (toast) toast.remove();
-    const fallbackBtn = document.getElementById(FALLBACK_BUTTON_ID);
-    if (fallbackBtn) fallbackBtn.remove();
   };
 
   const start = async () => {
@@ -866,50 +894,27 @@
       state.menuIds = [];
     }
     state.menuIds.push(GM_registerMenuCommand(
-      `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+      `[Page→MD] ${state.enabled ? '✓' : '✗'} Enable`,
       async () => { await setEnabled(!state.enabled); }
     ));
+    state.menuIds.push(GM_registerMenuCommand(
+      `[Page→MD] ↻ Always Run (${state.alwaysRun ? 'ON' : 'OFF'})`,
+      async () => { await setAlwaysRun(!state.alwaysRun); }
+    ));
     if (state.enabled) {
-      state.menuIds.push(GM_registerMenuCommand('Convert Page to Markdown', () => handleConvert({ aggressiveClutter: true })));
-      state.menuIds.push(GM_registerMenuCommand('Convert (no cleanup)', () => handleConvert({ aggressiveClutter: false })));
+      state.menuIds.push(GM_registerMenuCommand('[Page→MD] ⬇ Convert (with cleanup)', () => handleConvert({ aggressiveClutter: true })));
+      state.menuIds.push(GM_registerMenuCommand('[Page→MD] ⬇ Convert (no cleanup)', () => handleConvert({ aggressiveClutter: false })));
     }
   };
 
-  const injectFallbackButton = () => {
-    if (sharedUi) return;
-    if (document.getElementById(FALLBACK_BUTTON_ID)) return;
-    const button = document.createElement('button');
-    button.id = FALLBACK_BUTTON_ID;
-    button.type = 'button';
-    button.textContent = FALLBACK_BUTTON_TEXT;
-    button.title = 'Tap to save cleaned Markdown; long-press for raw HTML kept';
-    button.style.cssText = `
-      position: fixed;
-      bottom: 14px;
-      right: 14px;
-      z-index: 2147483647;
-      background: linear-gradient(145deg, #0d0d12, #151528);
-      color: #f8fafc;
-      border: 1px solid #ff70c6;
-      border-radius: 12px;
-      padding: 10px 14px;
-      font-size: 13px;
-      font-weight: 700;
-      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
-      box-shadow: 0 14px 28px rgba(0,0,0,0.48);
-      cursor: pointer;
-      letter-spacing: 0.01em;
-    `;
-    button.addEventListener('click', () => handleConvert({ aggressiveClutter: true }), { passive: true });
-    button.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      handleConvert({ aggressiveClutter: false });
-    });
-    const append = () => document.body && document.body.appendChild(button);
-    if (document.body) {
-      append();
-    } else {
-      document.addEventListener('DOMContentLoaded', append, { once: true });
+  const setAlwaysRun = async (value) => {
+    state.alwaysRun = !!value;
+    await gmStore.set(ALWAYS_RUN_KEY, state.alwaysRun);
+    registerMenu();
+    if (state.enabled && state.alwaysRun && !state.started) {
+      await start();
+    } else if (!state.alwaysRun && state.started) {
+      await teardown();
     }
   };
 
@@ -919,6 +924,8 @@
 
   const init = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
+    state.alwaysRun = await gmStore.get(ALWAYS_RUN_KEY, false);
+    
     if (sharedUi && !registrationAttempted) {
       registrationAttempted = true;
       sharedUi.registerScript({
@@ -929,12 +936,12 @@
         onToggle: (next) => setEnabled(next)
       });
     }
-    if (state.enabled) {
-      await start();
-    }
+    
     registerMenu();
-    if (state.enabled) {
-      injectFallbackButton();
+    
+    // Only auto-start if Always Run is enabled
+    if (state.enabled && state.alwaysRun) {
+      await start();
     }
   };
 

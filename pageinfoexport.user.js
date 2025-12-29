@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PGxpbmUgeDE9IjEyIiB5MT0iMTgiIHgyPSIxMiIgeTI9IjEyIi8+PHBvbHlsaW5lIHBvaW50cz0iOSAxNSAxMiAxOCAxNSAxNSIvPjwvc3ZnPg==
-// @version      2025.12.29.0542
+// @version      2025.12.29.2037
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -154,6 +154,7 @@
   const state = {
     enabled: true,
     started: false,
+    alwaysRun: false,
     menuIds: []
   };
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
@@ -1199,9 +1200,10 @@
     wrapper.style.gap = '10px';
 
     const text = document.createElement('p');
-    text.textContent = 'Export DOM, scripts, styles, and performance data. Results open the fallback UI if a download is blocked.';
+    text.textContent = 'Export DOM, scripts, styles, and performance data. Always on-demand, no automatic collection.';
     text.style.margin = '0';
     text.style.fontSize = '13px';
+    text.style.color = '#cbd5e1';
     wrapper.appendChild(text);
 
     const buttons = document.createElement('div');
@@ -1212,11 +1214,13 @@
     const exportBtn = document.createElement('button');
     exportBtn.type = 'button';
     exportBtn.textContent = 'Export page info';
-    exportBtn.style.padding = '8px 10px';
-    exportBtn.style.borderRadius = '8px';
+    exportBtn.style.padding = '8px 12px';
+    exportBtn.style.borderRadius = '6px';
     exportBtn.style.border = '1px solid rgba(255,255,255,0.18)';
     exportBtn.style.background = '#1f2937';
     exportBtn.style.color = '#f8fafc';
+    exportBtn.style.cursor = 'pointer';
+    exportBtn.style.fontSize = '13px';
     exportBtn.addEventListener('click', () => renderDialog());
 
     buttons.appendChild(exportBtn);
@@ -1238,11 +1242,11 @@
     }
     if (!hasUnregister && state.menuIds.length) return;
     state.menuIds.push(GM_registerMenuCommand(
-      `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+      `[Page Info] ${state.enabled ? '✓' : '✗'} Enable`,
       async () => { await setEnabled(!state.enabled); }
     ));
     if (state.enabled) {
-      state.menuIds.push(GM_registerMenuCommand('Export page info…', () => renderDialog()));
+      state.menuIds.push(GM_registerMenuCommand('[Page Info] 📋 Export page info', () => renderDialog()));
     }
   };
 
@@ -1276,6 +1280,8 @@
 
   const init = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
+    state.alwaysRun = await gmStore.get(ALWAYS_RUN_KEY, false);
+    
     if (sharedUi && !registrationAttempted) {
       registrationAttempted = true;
       sharedUi.registerScript({
@@ -1286,7 +1292,13 @@
         onToggle: (next) => setEnabled(next)
       });
     }
-    await setEnabled(state.enabled);
+    
+    registerMenu();
+    
+    // pageinfoexport is always on-demand, no auto-work regardless of Always Run
+    if (state.enabled) {
+      await start();
+    }
   };
 
   init().catch((err) => {

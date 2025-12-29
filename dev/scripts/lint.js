@@ -13,13 +13,14 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..', '..');
 const USERSCRIPT_PATTERN = /\.user\.js$/;
 
-// Canonical CDN URLs for dependency hygiene (Phase 4)
+// Canonical CDN URLs for dependency hygiene  
+// Note: unpkg used for Turndown to avoid CommonJS build issues with jsdelivr
 const CANONICAL_CDNS = {
   jquery: 'https://ajax.googleapis.com/ajax/libs/jquery/',
   jqueryui: 'https://ajax.googleapis.com/ajax/libs/jqueryui/',
   readability: 'https://cdn.jsdelivr.net/npm/@mozilla/readability@',
-  turndown: 'https://cdn.jsdelivr.net/npm/turndown@',
-  'turndown-plugin-gfm': 'https://cdn.jsdelivr.net/npm/turndown-plugin-gfm@'
+  turndown: 'https://unpkg.com/turndown@',
+  'turndown-plugin-gfm': 'https://unpkg.com/turndown-plugin-gfm@'
 };
 
 // Required metadata fields

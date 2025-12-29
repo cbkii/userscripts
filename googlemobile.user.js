@@ -4,7 +4,7 @@
 // @author       cbkii (mobile UI by Claude)
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTEiIGN5PSIxMSIgcj0iOCIvPjxwYXRoIGQ9Im0yMSAyMS00LjM1LTQuMzUiLz48L3N2Zz4=
 // @description  Mobile Google search helper with filters, dorks, and a compact UI.
-// @version      2025.12.29.0625
+// @version      2025.12.29.0725
 // @require      https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js
 // @require      https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js
 // @match        *://www.google.*/search*
@@ -1982,11 +1982,11 @@ if (document.readyState === 'loading') {
     }
     if (!hasUnregister && state.menuIds.length) return;
     state.menuIds.push(GM_registerMenuCommand(
-      `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
+      `[Google Mobile] ${state.enabled ? '✓' : '✗'} Enable`,
       async () => { await setEnabled(!state.enabled); }
     ));
     if (state.enabled) {
-      state.menuIds.push(GM_registerMenuCommand('Show Google search helper', () => {
+      state.menuIds.push(GM_registerMenuCommand('[Google Mobile] 🔍 Show search helper', () => {
         if (sharedUi) {
           sharedUi.switchPanel(SCRIPT_ID);
           sharedUi.toggleModal();
