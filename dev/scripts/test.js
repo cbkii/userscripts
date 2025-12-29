@@ -159,11 +159,36 @@ function main() {
     
     if (isWildcard) {
       test('Wildcard script avoids global pollution', () => {
-        // Check it doesn't assign to window.* outside of __CBKII or __userscript
-        const unsafeGlobals = content.match(/window\.(?!__CBKII|__userscript|addEventListener|removeEventListener|location|document|setTimeout|setInterval|clearTimeout|clearInterval|requestAnimationFrame|requestIdleCallback|getComputedStyle|matchMedia|localStorage|sessionStorage|open|close|scroll|innerWidth|innerHeight|outerWidth|outerHeight|pageXOffset|pageYOffset|screen|navigator|history|performance)(\w+)\s*=/g);
-        // Allow some safe patterns
-        const filtered = unsafeGlobals?.filter(g => !g.includes('__')) || [];
-        // This is a soft warning, not a hard failure
+        // Safe window properties that scripts are allowed to access/assign
+        const SAFE_WINDOW_PROPS = [
+          '__CBKII', '__userscript', '__userscriptSharedUi',
+          'addEventListener', 'removeEventListener',
+          'location', 'document',
+          'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval',
+          'requestAnimationFrame', 'requestIdleCallback',
+          'getComputedStyle', 'matchMedia',
+          'localStorage', 'sessionStorage',
+          'open', 'close', 'scroll',
+          'innerWidth', 'innerHeight', 'outerWidth', 'outerHeight',
+          'pageXOffset', 'pageYOffset',
+          'screen', 'navigator', 'history', 'performance'
+        ];
+        
+        // Find all window.* = assignments
+        const windowAssignments = content.match(/window\.(\w+)\s*=/g) || [];
+        const unsafeAssignments = windowAssignments.filter(assignment => {
+          const propMatch = assignment.match(/window\.(\w+)/);
+          if (!propMatch) return false;
+          const prop = propMatch[1];
+          // Allow namespaced properties (starting with __)
+          if (prop.startsWith('__')) return false;
+          // Allow safe properties
+          if (SAFE_WINDOW_PROPS.includes(prop)) return false;
+          return true;
+        });
+        
+        // This is a soft check - we don't fail on this, just track it
+        // Uncomment to enforce: assert(unsafeAssignments.length === 0, `Unsafe global assignments: ${unsafeAssignments.join(', ')}`);
       });
     }
   }
