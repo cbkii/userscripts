@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Page Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.2037
+// @version      2025.12.29.2328
 // @description  Unlock text selection, copy/paste, and context menu on restrictive sites. Optional overlay buster + aggressive mode. Lightweight + SPA-friendly.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHJlY3QgeD0iMyIgeT0iMTEiIHdpZHRoPSIxOCIgaGVpZ2h0PSIxMSIgcng9IjIiIHJ5PSIyIi8+PHBhdGggZD0iTTcgMTFWN2E1IDUgMCAwIDEgOS45LTEiLz48L3N2Zz4=
@@ -15,6 +15,7 @@
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // @grant        GM_notification
 // @run-at       document-start
 // @noframes
@@ -103,11 +104,37 @@
   let cfg = normaliseCfg(gmGet(STORAGE_KEY, DEFAULT_CFG));
   const host = location.hostname || '';
   let isHostDisabled = cfg.disabledHosts.includes(host);
+  const state = {
+    enabled: !!cfg.enabled,
+    alwaysRun: !!cfg.alwaysRun,
+    menuIds: [],
+  };
+  const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
+  const MENU_PREFIX = '[Unlock]';
   // Robust shared UI detection across sandbox boundaries
   // Try to use helper from userscriptui.user.js if available, otherwise use fallback
   let sharedUi = null;
   let sharedUiReady = false;
   let registrationAttempted = false;
+
+  function attemptSharedUiRegistration(tryRegister) {
+    if (registrationAttempted) return;
+    if (typeof tryRegister === 'function') {
+      registrationAttempted = true;
+      tryRegister(renderPanel, (next) => setEnabled(next), state.enabled);
+      return;
+    }
+    if (sharedUi && typeof sharedUi.registerScript === 'function') {
+      registrationAttempted = true;
+      sharedUi.registerScript({
+        id: SCRIPT_ID,
+        title: SCRIPT_TITLE,
+        enabled: state.enabled,
+        render: renderPanel,
+        onToggle: (next) => setEnabled(next)
+      });
+    }
+  }
 
   // Check if userscriptui.user.js provides the helper (reduces code duplication)
   const factory = (typeof window !== 'undefined' && window.__userscriptSharedUi) || 
@@ -122,13 +149,14 @@
       onReady: (ui, tryRegister) => {
         sharedUi = ui;
         sharedUiReady = true;
-        if (typeof state !== 'undefined' && typeof renderPanel === 'function' && typeof setEnabled === 'function') {
-          tryRegister(renderPanel, (next) => setEnabled(next), state.enabled);
-        }
+        attemptSharedUiRegistration(tryRegister);
       }
     });
     sharedUi = helper.sharedUi;
     sharedUiReady = helper.isReady;
+    if (sharedUiReady) {
+      attemptSharedUiRegistration();
+    }
   } else {
     // Fallback: inline discovery logic (for backward compatibility)
     const initSharedUi = (providedFactory) => {
@@ -151,6 +179,7 @@
           set: (key, value) => gmStore.set(key, value)
         });
         sharedUiReady = true;
+        attemptSharedUiRegistration();
         return true;
       }
       return false;
@@ -170,167 +199,198 @@
         }
         
         // Register/re-register if ready and not already done
-        if (sharedUi && typeof state !== 'undefined' && 
-            typeof renderPanel === 'function' && typeof setEnabled === 'function') {
-          if (!registrationAttempted) {
-            registrationAttempted = true;
-            sharedUi.registerScript({
-              id: SCRIPT_ID,
-              title: SCRIPT_TITLE,
-              enabled: state.enabled,
-              render: renderPanel,
-              onToggle: (next) => setEnabled(next)
-            });
-          }
-        }
+        attemptSharedUiRegistration();
       }, 0);
     });
   }
 
 
   //////////////////////////////////////////////////////////////
-  // SHARED UI INTEGRATION
+  // SHARED UI + MENU
   //////////////////////////////////////////////////////////////
 
-  function toggleEnabled(next) {
-    cfg.enabled = !!next;
+  function setEnabled(next) {
+    state.enabled = !!next;
+    cfg.enabled = state.enabled;
     gmSet(STORAGE_KEY, cfg);
     if (sharedUi) {
-      sharedUi.setScriptEnabled(SCRIPT_ID, cfg.enabled);
+      sharedUi.setScriptEnabled(SCRIPT_ID, state.enabled);
     }
-    gmNotify(`Page Unlocker: ${cfg.enabled ? 'Enabled' : 'Disabled'}. Reload to apply.`);
+    registerMenu();
+    location.reload();
   }
 
-  function toggleSetting(key, value) {
-    cfg[key] = value;
+  function setAlwaysRun(next) {
+    state.alwaysRun = !!next;
+    cfg.alwaysRun = state.alwaysRun;
     gmSet(STORAGE_KEY, cfg);
-    if (key === 'disabledHosts') {
-      isHostDisabled = cfg.disabledHosts.includes(host);
+    registerMenu();
+    gmNotify(`Page Unlocker: Always Run ${state.alwaysRun ? 'enabled' : 'disabled'}. Reloading...`);
+    location.reload();
+  }
+
+  function toggleSite(enable) {
+    const nextEnabled = typeof enable === 'boolean' ? enable : isHostDisabled;
+    const set = new Set(cfg.disabledHosts);
+    if (nextEnabled) {
+      set.delete(host);
+      isHostDisabled = false;
+    } else {
+      set.add(host);
+      isHostDisabled = true;
     }
-    gmNotify(`Page Unlocker: setting updated. Reload to apply.`);
+    cfg.disabledHosts = [...set].sort();
+    gmSet(STORAGE_KEY, cfg);
+    registerMenu();
+    location.reload();
+  }
+
+  function toggleAggressive(next) {
+    cfg.aggressive = typeof next === 'boolean' ? next : !cfg.aggressive;
+    gmSet(STORAGE_KEY, cfg);
+    registerMenu();
+    location.reload();
+  }
+
+  function toggleOverlayBuster(next) {
+    cfg.overlayBuster = typeof next === 'boolean' ? next : !cfg.overlayBuster;
+    gmSet(STORAGE_KEY, cfg);
+    registerMenu();
+    location.reload();
+  }
+
+  function toggleCopyTail(next) {
+    cfg.cleanCopyTail = typeof next === 'boolean' ? next : !cfg.cleanCopyTail;
+    gmSet(STORAGE_KEY, cfg);
+    registerMenu();
+    location.reload();
+  }
+
+  function toggleInterceptKeys(next) {
+    cfg.interceptKeys = typeof next === 'boolean' ? next : !cfg.interceptKeys;
+    gmSet(STORAGE_KEY, cfg);
+    registerMenu();
+    location.reload();
+  }
+
+  function runForceUnlock() {
+    try { forceUnlockNow(); gmNotify('Page Unlocker: forced unlock executed'); } catch (_) {}
+  }
+
+  function resetSettings() {
+    gmDel(STORAGE_KEY);
+    location.reload();
+  }
+
+  function registerMenu() {
+    if (typeof GM_registerMenuCommand !== 'function') return;
+    if (hasUnregister && state.menuIds.length) {
+      state.menuIds.forEach((id) => { try { GM_unregisterMenuCommand(id); } catch (_) {} });
+      state.menuIds = [];
+    }
+    state.menuIds.push(GM_registerMenuCommand(
+      `${MENU_PREFIX} 🔓 ${state.enabled ? '✓ Enabled' : '✗ Disabled'} (reload)`,
+      () => setEnabled(!state.enabled)
+    ));
+    state.menuIds.push(GM_registerMenuCommand(
+      `${MENU_PREFIX} ↻ Always Run (${state.alwaysRun ? 'ON' : 'OFF'})`,
+      () => setAlwaysRun(!state.alwaysRun)
+    ));
+    state.menuIds.push(GM_registerMenuCommand(
+      `${MENU_PREFIX} 🌐 This site (${isHostDisabled ? 'OFF' : 'ON'})`,
+      () => toggleSite(!isHostDisabled)
+    ));
+    state.menuIds.push(GM_registerMenuCommand(
+      `${MENU_PREFIX} 🛡 Mode: ${cfg.aggressive ? 'Aggressive' : 'Normal'} (reload)`,
+      () => toggleAggressive(!cfg.aggressive)
+    ));
+    state.menuIds.push(GM_registerMenuCommand(
+      `${MENU_PREFIX} 🧹 Overlay buster (${cfg.overlayBuster ? 'ON' : 'OFF'})`,
+      () => toggleOverlayBuster(!cfg.overlayBuster)
+    ));
+    state.menuIds.push(GM_registerMenuCommand(
+      `${MENU_PREFIX} ✂️ Copy tail cleaner (${cfg.cleanCopyTail ? 'ON' : 'OFF'})`,
+      () => toggleCopyTail(!cfg.cleanCopyTail)
+    ));
+    state.menuIds.push(GM_registerMenuCommand(
+      `${MENU_PREFIX} ⌨️ Key stopper (${cfg.interceptKeys ? 'ON' : 'OFF'})`,
+      () => toggleInterceptKeys(!cfg.interceptKeys)
+    ));
+    state.menuIds.push(GM_registerMenuCommand(
+      `${MENU_PREFIX} ⚡ Force unlock now`,
+      () => runForceUnlock()
+    ));
+    state.menuIds.push(GM_registerMenuCommand(
+      `${MENU_PREFIX} 🗑 Reset settings`,
+      () => resetSettings()
+    ));
   }
 
   function renderPanel() {
     const panel = document.createElement('div');
     panel.style.cssText = 'padding: 12px; color: #e5e7eb; font-family: system-ui, sans-serif; font-size: 13px;';
     const title = document.createElement('h3');
-    title.textContent = 'Page Unlocker Settings';
+    title.textContent = 'Page Unlocker';
     title.style.cssText = 'margin: 0 0 12px 0; font-size: 15px; font-weight: 700; color: #f8fafc;';
     panel.appendChild(title);
     const note = document.createElement('p');
-    note.textContent = '⚠️ Changes require page reload to take effect.';
+    note.textContent = '⚠️ Most changes reload the page to take effect.';
     note.style.cssText = 'margin: 0 0 14px 0; padding: 8px; background: rgba(251,191,36,0.15); border-left: 3px solid #fbbf24; font-size: 12px; color: #fcd34d; border-radius: 4px;';
     panel.appendChild(note);
     const createToggle = (label, checked, onChange) => {
+      let current = !!checked;
       const row = document.createElement('div');
       row.style.cssText = 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px;';
       const labelEl = document.createElement('span');
       labelEl.textContent = label;
       labelEl.style.cssText = 'flex: 1; color: #cbd5e1;';
       const btn = document.createElement('button');
-      btn.textContent = checked ? 'ON' : 'OFF';
-      btn.style.cssText = `padding: 4px 12px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.2); cursor: pointer; font-size: 11px; font-weight: 700; ${checked ? 'background: #10b981; color: #111;' : 'background: #374151; color: #9ca3af;'}`;
+      const syncBtn = () => {
+        btn.textContent = current ? 'ON' : 'OFF';
+        btn.style.background = current ? '#10b981' : '#374151';
+        btn.style.color = current ? '#111' : '#9ca3af';
+      };
+      btn.style.cssText = 'padding: 4px 12px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.2); cursor: pointer; font-size: 11px; font-weight: 700;';
+      syncBtn();
       btn.addEventListener('click', () => {
-        const newVal = !checked;
-        onChange(newVal);
-        btn.textContent = newVal ? 'ON' : 'OFF';
-        btn.style.background = newVal ? '#10b981' : '#374151';
-        btn.style.color = newVal ? '#111' : '#9ca3af';
+        current = !current;
+        onChange(current);
+        syncBtn();
       });
       row.appendChild(labelEl);
       row.appendChild(btn);
       return row;
     };
-    const createButton = (label, onClick) => {
+    const createButton = (label, onClick, variant = 'primary') => {
       const btn = document.createElement('button');
       btn.textContent = label;
-      btn.style.cssText = 'padding: 8px 14px; margin: 6px 0; background: #3b82f6; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; width: 100%;';
+      const base = variant === 'danger' ? '#ef4444' : '#3b82f6';
+      btn.style.cssText = `padding: 8px 14px; margin: 6px 0; background: ${base}; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; width: 100%;`;
       btn.addEventListener('click', onClick);
-      btn.addEventListener('mouseenter', () => { btn.style.background = '#2563eb'; });
-      btn.addEventListener('mouseleave', () => { btn.style.background = '#3b82f6'; });
+      btn.addEventListener('mouseenter', () => { btn.style.background = variant === 'danger' ? '#dc2626' : '#2563eb'; });
+      btn.addEventListener('mouseleave', () => { btn.style.background = base; });
       return btn;
     };
-    panel.appendChild(createToggle('Aggressive mode (blocks more events)', cfg.aggressive, (val) => toggleSetting('aggressive', val)));
-    panel.appendChild(createToggle('Overlay buster (removes blocking overlays)', cfg.overlayBuster, (val) => toggleSetting('overlayBuster', val)));
-    panel.appendChild(createToggle('Copy tail cleaner (removes attribution)', cfg.cleanCopyTail, (val) => toggleSetting('cleanCopyTail', val)));
-    panel.appendChild(createToggle('Key event stopper (intercepts keyboard)', cfg.interceptKeys, (val) => toggleSetting('interceptKeys', val)));
-    const thisSiteRow = createToggle(`This site (${host || 'unknown'})`, !isHostDisabled, (val) => {
-      const set = new Set(cfg.disabledHosts);
-      if (val) { set.delete(host); } else { set.add(host); }
-      cfg.disabledHosts = [...set].sort();
-      isHostDisabled = !val;
-      toggleSetting('disabledHosts', cfg.disabledHosts);
-    });
-    panel.appendChild(thisSiteRow);
+    panel.appendChild(createToggle('🔓 Enable Page Unlocker (reload)', state.enabled, (val) => setEnabled(val)));
+    panel.appendChild(createToggle('↻ Always Run on all sites', state.alwaysRun, (val) => setAlwaysRun(val)));
+    panel.appendChild(createToggle(`🌐 Enable on this site (${host || 'unknown'})`, !isHostDisabled, (val) => toggleSite(val)));
+    panel.appendChild(createToggle('🛡 Aggressive mode (blocks more events)', cfg.aggressive, (val) => toggleAggressive(val)));
+    panel.appendChild(createToggle('🧹 Overlay buster (remove blockers)', cfg.overlayBuster, (val) => toggleOverlayBuster(val)));
+    panel.appendChild(createToggle('✂️ Copy tail cleaner (strip attribution)', cfg.cleanCopyTail, (val) => toggleCopyTail(val)));
+    panel.appendChild(createToggle('⌨️ Key event stopper (intercepts keys)', cfg.interceptKeys, (val) => toggleInterceptKeys(val)));
     const sep = document.createElement('hr');
     sep.style.cssText = 'border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 14px 0;';
     panel.appendChild(sep);
-    panel.appendChild(createButton('⚡ Force unlock now', () => {
-      if (typeof forceUnlockNow === 'function') { forceUnlockNow(); gmNotify('Page Unlocker: forced unlock executed'); }
-    }));
-    panel.appendChild(createButton('🔄 Reset all settings', () => {
-      if (confirm('Reset all Page Unlocker settings to defaults?')) { gmDel(STORAGE_KEY); gmNotify('Page Unlocker: settings reset. Reload to apply.'); }
-    }));
+    panel.appendChild(createButton('⚡ Force unlock now', () => runForceUnlock()));
+    panel.appendChild(createButton('🗑 Reset all settings', () => {
+      if (confirm('Reset all Page Unlocker settings to defaults?')) {
+        resetSettings();
+      }
+    }, 'danger'));
     return panel;
   }
 
-  // --- Menu (always available, even when disabled) ---
-  gmMenu(`Page Unlock Pro: ${cfg.enabled ? 'Enabled' : 'Disabled'} (toggle)`, () => {
-    cfg.enabled = !cfg.enabled;
-    gmSet(STORAGE_KEY, cfg);
-    if (sharedUi) {
-      sharedUi.setScriptEnabled(SCRIPT_ID, cfg.enabled);
-    }
-    location.reload();
-  });
-
-  gmMenu(`This site: ${isHostDisabled ? 'Disabled' : 'Enabled'} (toggle)`, () => {
-    const set = new Set(cfg.disabledHosts);
-    if (set.has(host)) set.delete(host);
-    else set.add(host);
-    cfg.disabledHosts = [...set].sort();
-    gmSet(STORAGE_KEY, cfg);
-    location.reload();
-  });
-
-  gmMenu(`Mode: ${cfg.aggressive ? 'Aggressive' : 'Normal'} (toggle)`, () => {
-    cfg.aggressive = !cfg.aggressive;
-    gmSet(STORAGE_KEY, cfg);
-    location.reload();
-  });
-
-  gmMenu(`Overlay buster: ${cfg.overlayBuster ? 'On' : 'Off'} (toggle)`, () => {
-    cfg.overlayBuster = !cfg.overlayBuster;
-    gmSet(STORAGE_KEY, cfg);
-    location.reload();
-  });
-
-  gmMenu(`Copy tail cleaner: ${cfg.cleanCopyTail ? 'On' : 'Off'} (toggle)`, () => {
-    cfg.cleanCopyTail = !cfg.cleanCopyTail;
-    gmSet(STORAGE_KEY, cfg);
-    location.reload();
-  });
-
-  gmMenu(`Key event stopper: ${cfg.interceptKeys ? 'On' : 'Off'} (toggle)`, () => {
-    cfg.interceptKeys = !cfg.interceptKeys;
-    gmSet(STORAGE_KEY, cfg);
-    location.reload();
-  });
-
-  gmMenu('Run: Force unlock now (remove overlays, restore scroll)', () => {
-    try { forceUnlockNow(); gmNotify('Page Unlock Pro: forced unlock run'); } catch (_) {}
-  });
-
-  gmMenu('Always Run: ' + (cfg.alwaysRun ? 'On' : 'Off') + ' (toggle)', () => {
-    cfg.alwaysRun = !cfg.alwaysRun;
-    gmSet(STORAGE_KEY, cfg);
-    gmNotify('Page Unlocker: Always Run ' + (cfg.alwaysRun ? 'enabled' : 'disabled'));
-  });
-
-  gmMenu('Reset settings', () => {
-    gmDel(STORAGE_KEY);
-    location.reload();
-  });
+  registerMenu();
 
   // Always return early if globally/site disabled, but keep menu available.
   // Dormant by default: only run automatically if Always Run is enabled
