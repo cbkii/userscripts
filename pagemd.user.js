@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.0725
+// @version      2025.12.29.0842
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PHBhdGggZD0iTTEwIDEzaDQiLz48cGF0aCBkPSJNMTAgMTdoNCIvPjxwYXRoIGQ9Ik0xMCA5aDIiLz48L3N2Zz4=
@@ -796,6 +796,7 @@
     description.style.margin = '0';
     description.style.fontSize = '13px';
     description.style.lineHeight = '1.4';
+    description.style.color = '#cbd5e1';
     wrapper.appendChild(description);
 
     const buttonsRow = document.createElement('div');
@@ -807,12 +808,13 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = label;
-      btn.style.padding = '8px 10px';
-      btn.style.borderRadius = '8px';
-      btn.style.border = '1px solid rgba(255,255,255,0.16)';
+      btn.style.padding = '8px 12px';
+      btn.style.borderRadius = '6px';
+      btn.style.border = '1px solid rgba(255,255,255,0.18)';
       btn.style.background = '#1f2937';
       btn.style.color = '#f8fafc';
       btn.style.cursor = 'pointer';
+      btn.style.fontSize = '13px';
       btn.addEventListener('click', () => handleConvert(opts));
       return btn;
     };

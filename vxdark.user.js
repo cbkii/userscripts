@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Router Contrast Dark Mode
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.0725
+// @version      2025.12.29.0842
 // @description  High-contrast dark mode for the VX230V router UI.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTIxIDEyLjc5QTkgOSAwIDEgMSAxMS4yMSAzIDcgNyAwIDAgMCAyMSAxMi43OXoiLz48L3N2Zz4=
@@ -466,21 +466,24 @@
       const wrapper = document.createElement('div');
       wrapper.style.display = 'flex';
       wrapper.style.flexDirection = 'column';
-      wrapper.style.gap = '8px';
+      wrapper.style.gap = '10px';
 
       const status = document.createElement('div');
       status.textContent = state.enabled ? 'Dark mode is active.' : 'Dark mode is disabled.';
       status.style.fontSize = '13px';
+      status.style.color = '#cbd5e1';
       wrapper.appendChild(status);
 
       const toggleBtn = document.createElement('button');
       toggleBtn.type = 'button';
       toggleBtn.textContent = state.enabled ? 'Disable' : 'Enable';
-      toggleBtn.style.padding = '8px 10px';
-      toggleBtn.style.borderRadius = '8px';
+      toggleBtn.style.padding = '8px 12px';
+      toggleBtn.style.borderRadius = '6px';
       toggleBtn.style.border = '1px solid rgba(255,255,255,0.18)';
       toggleBtn.style.background = '#1f2937';
       toggleBtn.style.color = '#f8fafc';
+      toggleBtn.style.cursor = 'pointer';
+      toggleBtn.style.fontSize = '13px';
       toggleBtn.addEventListener('click', () => setEnabled(!state.enabled));
       wrapper.appendChild(toggleBtn);
 

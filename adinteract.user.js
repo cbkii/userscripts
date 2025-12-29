@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ad Interaction Gate Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.0725
+// @version      2025.12.29.0842
 // @description  Unlocks ad interaction gates after repeated clicks with optional auto-actions.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTMgM2w3LjA3IDE2Ljk3IDIuNTEtNy4zOSA3LjM5LTIuNTFMMyAzeiIvPjxwYXRoIGQ9Ik0xMyAxM2w2IDYiLz48L3N2Zz4=
@@ -646,17 +646,19 @@ bootstrap().catch((err) => {
         info.textContent = 'Unlock ad interaction gates after repeated clicks. Disabling mid-session may require a reload to fully revert page patches.';
         info.style.margin = '0';
         info.style.fontSize = '13px';
+        info.style.color = '#cbd5e1';
         wrapper.appendChild(info);
 
         const runBtn = document.createElement('button');
         runBtn.type = 'button';
         runBtn.textContent = 'Force run now';
-        runBtn.style.padding = '8px 10px';
-        runBtn.style.borderRadius = '8px';
-        runBtn.style.border = '1px solid rgba(255,255,255,0.16)';
+        runBtn.style.padding = '8px 12px';
+        runBtn.style.borderRadius = '6px';
+        runBtn.style.border = '1px solid rgba(255,255,255,0.18)';
         runBtn.style.background = '#1f2937';
         runBtn.style.color = '#f8fafc';
         runBtn.style.cursor = 'pointer';
+        runBtn.style.fontSize = '13px';
         runBtn.addEventListener('click', () => {
             if (state.enabled) {
                 start();
@@ -667,12 +669,13 @@ bootstrap().catch((err) => {
         const refreshBtn = document.createElement('button');
         refreshBtn.type = 'button';
         refreshBtn.textContent = 'Refresh ad-interaction exclusion list';
-        refreshBtn.style.padding = '8px 10px';
-        refreshBtn.style.borderRadius = '8px';
-        refreshBtn.style.border = '1px solid rgba(255,255,255,0.16)';
+        refreshBtn.style.padding = '8px 12px';
+        refreshBtn.style.borderRadius = '6px';
+        refreshBtn.style.border = '1px solid rgba(255,255,255,0.18)';
         refreshBtn.style.background = '#1f2937';
         refreshBtn.style.color = '#f8fafc';
         refreshBtn.style.cursor = 'pointer';
+        refreshBtn.style.fontSize = '13px';
         refreshBtn.addEventListener('click', () => {
             refreshExclusions().then(() => {
                 showToast('Exclusion list refreshed');

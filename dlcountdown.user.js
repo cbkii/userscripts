@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.0725
+// @version      2025.12.29.0842
 // @description  Accelerates download countdown timers and enables download controls.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cG9seWxpbmUgcG9pbnRzPSIxMiA2IDEyIDEyIDE2IDE0Ii8+PC9zdmc+
@@ -897,6 +897,7 @@
             ? `Running at ${ACCELERATION_FACTOR}x speed`
             : 'Disabled (normal timers)';
         status.style.fontSize = '13px';
+        status.style.color = '#cbd5e1';
         wrapper.appendChild(status);
 
         const buttons = doc.createElement('div');
@@ -907,22 +908,26 @@
         const toggleBtn = doc.createElement('button');
         toggleBtn.type = 'button';
         toggleBtn.textContent = state.enabled ? 'Disable' : 'Enable';
-        toggleBtn.style.padding = '8px 10px';
-        toggleBtn.style.borderRadius = '8px';
+        toggleBtn.style.padding = '8px 12px';
+        toggleBtn.style.borderRadius = '6px';
         toggleBtn.style.border = '1px solid rgba(255,255,255,0.18)';
         toggleBtn.style.background = '#1f2937';
         toggleBtn.style.color = '#f8fafc';
+        toggleBtn.style.cursor = 'pointer';
+        toggleBtn.style.fontSize = '13px';
         toggleBtn.addEventListener('click', () => setEnabled(!state.enabled));
         buttons.appendChild(toggleBtn);
 
         const rescanBtn = doc.createElement('button');
         rescanBtn.type = 'button';
         rescanBtn.textContent = 'Rescan timers';
-        rescanBtn.style.padding = '8px 10px';
-        rescanBtn.style.borderRadius = '8px';
+        rescanBtn.style.padding = '8px 12px';
+        rescanBtn.style.borderRadius = '6px';
         rescanBtn.style.border = '1px solid rgba(255,255,255,0.18)';
         rescanBtn.style.background = '#1f2937';
         rescanBtn.style.color = '#f8fafc';
+        rescanBtn.style.cursor = 'pointer';
+        rescanBtn.style.fontSize = '13px';
         rescanBtn.addEventListener('click', () => {
             utils.findAndAccelerateTimerElements();
             timerAccelerator.accelerateGlobalTimers();
