@@ -1,0 +1,15 @@
+{
+  "name": "userscripts-dev",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Development tooling for userscripts repository",
+  "scripts": {
+    "lint": "node scripts/lint.js",
+    "test": "node scripts/test.js",
+    "validate": "npm run lint && npm run test"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

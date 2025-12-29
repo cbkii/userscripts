@@ -1,0 +1,51 @@
+name: Lint and Test Userscripts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '*.user.js'
+      - 'dev/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '*.user.js'
+      - 'dev/**'
+      - '.github/workflows/ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run syntax check (node --check)
+        run: |
+          echo "Running node --check on all userscripts..."
+          failed=0
+          for f in *.user.js; do
+            echo "Checking: $f"
+            if ! node --check "$f" 2>&1; then
+              failed=1
+            fi
+          done
+          exit $failed
+
+      - name: Run lint script
+        working-directory: ./dev
+        run: node scripts/lint.js
+
+      - name: Run test script
+        working-directory: ./dev
+        run: node scripts/test.js

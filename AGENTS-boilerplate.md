@@ -193,3 +193,114 @@ const createLogger = (...) => { ... };
 - Negative paths (excluded URLs, missing elements).
 - SPA/navigation changes if applicable.
 - Toggle enable/disable to verify teardown and re-init (shared UI + fallback).
+
+---
+
+## Wildcard scripts: Dormant by default
+
+Scripts matching `*://*/*` or similar broad patterns **must** be dormant by default:
+
+### Required pattern
+
+```js
+const ALWAYS_RUN_KEY = `${SCRIPT_ID}.alwaysRun`;
+
+async function init() {
+  state.enabled = await gmStore.get(ENABLE_KEY, true);
+  state.alwaysRun = await gmStore.get(ALWAYS_RUN_KEY, false);
+  
+  registerMenu();  // Always register menu commands
+  
+  if (sharedUi) {
+    sharedUi.registerScript({
+      id: SCRIPT_ID,
+      title: SCRIPT_TITLE,
+      enabled: state.enabled,
+      render: renderPanel,
+      onToggle: (next) => setEnabled(next)
+    });
+  }
+  
+  // Only auto-start if Always Run is enabled
+  if (state.enabled && state.alwaysRun) {
+    await start();
+  }
+}
+```
+
+### Required UI elements
+- Show "Always Run" toggle in shared UI panel
+- Show current state (dormant vs active) in panel
+- Provide "Run now" button for on-demand activation
+- Update menu commands to reflect dormant/active state
+
+---
+
+## Lifecycle contract
+
+Every script must implement these lifecycle methods:
+
+### `init()` — Boot
+- Read configuration from storage
+- Register with shared UI
+- Register menu commands
+- **Do NOT** start heavy work unless Always Run is enabled
+
+### `start()` — Activate
+- Must be **idempotent** (safe to call multiple times)
+- Begin script's active behaviour (observers, DOM changes, etc.)
+- Track all resources for cleanup
+
+### `stop()` — Teardown
+- Disconnect all MutationObservers
+- Remove all injected DOM nodes
+- Remove injected styles
+- Clear all intervals/timeouts
+- Abort pending fetch operations (use AbortController)
+- Unregister menu commands where supported
+- Reset state flags
+
+### Resources tracker pattern
+
+```js
+const resources = {
+  observers: [],
+  intervals: [],
+  timeouts: [],
+  abortControllers: [],
+  injectedNodes: []
+};
+
+function trackObserver(observer) {
+  resources.observers.push(observer);
+  return observer;
+}
+
+function cleanup() {
+  resources.observers.forEach(obs => { try { obs.disconnect(); } catch (_) {} });
+  resources.intervals.forEach(id => clearInterval(id));
+  resources.timeouts.forEach(id => clearTimeout(id));
+  resources.abortControllers.forEach(ac => { try { ac.abort(); } catch (_) {} });
+  resources.injectedNodes.forEach(node => { try { node.remove(); } catch (_) {} });
+  // Reset arrays
+  Object.keys(resources).forEach(k => resources[k] = []);
+}
+```
+
+---
+
+## Running validation
+
+Before committing, run the dev tooling:
+
+```bash
+cd dev
+npm run validate
+```
+
+This runs:
+1. `node --check` syntax validation on all scripts
+2. Metadata validation (required fields, namespace, version format)
+3. Pattern checks (IIFE wrapper, strict mode, etc.)
+
+All scripts must pass with 0 errors before merge.

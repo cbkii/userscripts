@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ad Interaction Gate Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.28.1310
+// @version      2025.12.29.0542
 // @description  Unlocks ad interaction gates after repeated clicks with optional auto-actions.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTMgM2w3LjA3IDE2Ljk3IDIuNTEtNy4zOSA3LjM5LTIuNTFMMyAzeiIvPjxwYXRoIGQ9Ik0xMyAxM2w2IDYiLz48L3N2Zz4=
@@ -54,6 +54,7 @@
     const SCRIPT_ID = 'adinteract';
     const SCRIPT_TITLE = 'Ad Interaction Unlock';
     const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+    const ALWAYS_RUN_KEY = `${SCRIPT_ID}.alwaysRun`;
 
     //////////////////////////////////////////////////////////////
     // UTILITIES & HELPERS
@@ -150,14 +151,16 @@
         }, 0);
       });
     }
-          }
-        }
-      }, 0);
-    });
     const state = {
         enabled: true,
         started: false,
-        menuIds: []
+        alwaysRun: false,
+        menuIds: [],
+        // Resource tracking for cleanup
+        resources: {
+            eventListeners: [],
+            injectedNodes: []
+        }
     };
     const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
@@ -170,7 +173,7 @@
                 /([?&])(token|auth|key|session|password|passwd|secret)=([^&]+)/ig,
                 '$1$2=[redacted]'
             );
-            if (/^https?:\\/\\//i.test(text)) {
+            if (/^https?:\/\//i.test(text)) {
                 try {
                     const url = new URL(text);
                     text = `${url.origin}${url.pathname}`;
@@ -697,13 +700,32 @@ bootstrap().catch((err) => {
             `Toggle ${SCRIPT_TITLE} (${state.enabled ? 'ON' : 'OFF'})`,
             async () => { await setEnabled(!state.enabled); }
         ));
+        state.menuIds.push(GM_registerMenuCommand(
+            `Always Run (${state.alwaysRun ? 'ON' : 'OFF'})`,
+            async () => { await setAlwaysRun(!state.alwaysRun); }
+        ));
         if (state.enabled) {
-            state.menuIds.push(GM_registerMenuCommand('Force run ad unlocker', () => main()));
+            state.menuIds.push(GM_registerMenuCommand('Run ad unlocker now', () => main()));
         }
+    };
+
+    const setAlwaysRun = async (value) => {
+        state.alwaysRun = !!value;
+        await gmStore.set(ALWAYS_RUN_KEY, state.alwaysRun);
+        registerMenu();
     };
 
     const stop = async () => {
         state.started = false;
+        // Clean up resources
+        if (state.resources) {
+            state.resources.eventListeners.forEach(({ target, type, handler, options }) => {
+                try { target.removeEventListener(type, handler, options); } catch (_) {}
+            });
+            state.resources.eventListeners = [];
+            state.resources.injectedNodes.forEach(node => { try { node.remove(); } catch (_) {} });
+            state.resources.injectedNodes = [];
+        }
     };
 
     const start = async () => {
@@ -720,9 +742,8 @@ bootstrap().catch((err) => {
         }
         if (!state.enabled) {
             await stop();
-        } else if (!state.started) {
-            await start();
         }
+        // Don't auto-start on enable - respect dormant-by-default
         registerMenu();
     };
 
@@ -732,6 +753,9 @@ bootstrap().catch((err) => {
 
     const init = async () => {
         state.enabled = await gmStore.get(ENABLE_KEY, true);
+        state.alwaysRun = await gmStore.get(ALWAYS_RUN_KEY, false);
+        
+        // Register with shared UI
         if (sharedUi && !registrationAttempted) {
             registrationAttempted = true;
             sharedUi.registerScript({
@@ -742,7 +766,14 @@ bootstrap().catch((err) => {
                 onToggle: (next) => setEnabled(next)
             });
         }
-        await setEnabled(state.enabled);
+        
+        // Register menu commands (always available)
+        registerMenu();
+        
+        // Only auto-start if Always Run is enabled (dormant by default)
+        if (state.enabled && state.alwaysRun) {
+            await start();
+        }
     };
 
     init().catch((err) => {
