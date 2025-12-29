@@ -229,7 +229,6 @@
     cfg.alwaysRun = !!next;
     gmSet(STORAGE_KEY, cfg);
     registerMenu();
-    gmNotify(`Page Unlocker: Always Run ${cfg.alwaysRun ? 'enabled' : 'disabled'}. Reloading...`);
     location.reload();
   }
 
@@ -295,7 +294,9 @@
   function registerMenu() {
     if (typeof GM_registerMenuCommand !== 'function') return;
     if (hasUnregister && state.menuIds.length) {
-      state.menuIds.forEach((id) => { try { GM_unregisterMenuCommand(id); } catch (_) {} });
+      state.menuIds.forEach((id) => {
+        try { GM_unregisterMenuCommand(id); } catch (err) { if (DEBUG) console.warn(LOG_PREFIX, 'Failed to unregister menu', id, err); }
+      });
       state.menuIds = [];
     }
     state.menuIds.push(GM_registerMenuCommand(
