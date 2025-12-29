@@ -336,7 +336,153 @@ When asked to build or update a script:
 
 ---
 
-## 14) References (for agents)
+## 14) Dormant by default (for wildcard scripts)
+
+Any script with `@match *://*/*` or similar broad patterns **must** follow "Dormant by default" rules:
+
+### Required behaviour
+- On page load, the script **may**:
+  - Register menu commands
+  - Create minimal UI shell (panel entry in shared UI manager)
+  - Read configuration
+  - Set up lightweight event hooks that do NOT do heavy work
+
+- The script **must NOT**:
+  - Run heavy DOM scans
+  - Start MutationObservers that traverse large subtrees continuously
+  - Start polling loops
+  - Inject heavy CSS/HTML
+  - Call network operations
+  - ...unless triggered explicitly by the user via UI/menu **or** unless the user enables "Always Run".
+
+### Always Run toggle (required)
+- Provide a per-script setting `Always Run` (stored via `GM_getValue`/`GM_setValue`)
+- Default: **OFF**
+- When ON: script may auto-run its main actions on every matching page
+- When OFF: heavy actions only run on demand (UI/menu button)
+- Make state visible in UI (e.g., toggle + status text)
+- Ensure it's safe across frames
+
+### Implementation pattern
+```js
+const ALWAYS_RUN_KEY = `${SCRIPT_ID}.alwaysRun`;
+let alwaysRun = await GM_getValue(ALWAYS_RUN_KEY, false);
+
+// In init():
+if (alwaysRun) {
+  start(); // Full activation
+} else {
+  // Only register commands and UI hooks
+  registerMenu();
+  registerSharedUiPanel();
+}
+```
+
+---
+
+## 15) Dependency hygiene
+
+### Canonical CDN URLs
+If multiple scripts use the same third-party library, they **must** use:
+- The **same version**
+- The **same CDN source URL**
+
+Canonical CDN URLs for this repository:
+| Library | Canonical CDN URL |
+|---------|-------------------|
+| jQuery | `https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js` |
+| jQuery UI | `https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js` |
+| Readability | `https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/Readability.js` |
+| Turndown | `https://cdn.jsdelivr.net/npm/turndown@7.2.2/lib/turndown.browser.cjs.min.js` |
+| Turndown GFM | `https://cdn.jsdelivr.net/npm/turndown-plugin-gfm@1.0.2/dist/turndown-plugin-gfm.min.js` |
+
+### Rules
+- Never load the same library from multiple CDNs in different scripts
+- Prefer removing jQuery in new/refactored code (use vanilla DOM)
+- If keeping jQuery, isolate it (avoid polluting page globals, avoid conflicts)
+- The `/dev/scripts/lint.js` tool checks for non-canonical URLs
+
+---
+
+## 16) Dev tooling and CI
+
+### Location rules
+- All development tooling lives in `/dev`
+- No bundling/release build scripts; releases are produced via Git tags
+- `/dev/package.json` contains scripts for linting and testing
+
+### Available scripts
+```bash
+cd dev
+npm run lint     # node --check + metadata validation
+npm run test     # metadata tests, pattern checks
+npm run validate # lint + test combined
+```
+
+### CI pipeline
+The repository uses GitHub Actions (`.github/workflows/ci.yml`) to run:
+1. `node --check` on all userscripts (hard fail on syntax errors)
+2. Lint script (validates metadata, checks for issues)
+3. Test script (runs deterministic checks)
+
+### Adding new checks
+Add new validation logic to `/dev/scripts/lint.js` or `/dev/scripts/test.js`.
+
+---
+
+## 17) Common Tampermonkey failure modes
+
+### A) Invalid or too-broad `@match`/`@include` patterns
+- `@match` does **not** include query parameters (`?...`); use `@include` or runtime URL checks
+- Prefer narrow patterns + runtime checks over `*://*/*`
+- Test patterns with Tampermonkey's "Includes" tab before deployment
+
+### B) Regex `@include` caveats
+- In Tampermonkey MV3 "Dynamic Mode", regex `@include` may inject into every frame
+- Keep regex patterns tight and use `@noframes` unless frame injection is needed
+- Test on sites with many iframes to verify behaviour
+
+### C) `document-start` timing unreliability
+- DOM may not exist at `document-start`; prefer `document-idle` with guards
+- If `document-start` is required:
+  - Do almost nothing until DOM is safe
+  - Use `MutationObserver` to wait for elements
+  - Never assume `document.body` exists
+  - Keep `document-start` work minimal (e.g., early patches only)
+
+### D) Library conflicts
+- jQuery/global collisions with page libraries cause silent errors
+- Use `noConflict()` or avoid jQuery entirely in new scripts
+- Never override `window.jQuery`, `window.$`, or other common globals
+- Isolate all script logic inside IIFE; expose only namespaced globals
+
+### E) Heavy DOM polling / unbounded MutationObservers
+- Continuous `setInterval` polling without backoff causes CPU saturation
+- MutationObservers with `subtree: true` on large nodes can cause layout thrashing
+- Always:
+  - Disconnect observers when no longer needed
+  - Use `debounce` or `throttle` for observer callbacks
+  - Pause on tab hidden (`visibilitychange`)
+  - Set hard timeouts for retry loops
+
+### F) Missing/incorrect `@grant`
+- Missing grants cause APIs to be `undefined` at runtime
+- Incorrect sandbox mode (`@grant none` when GM APIs are needed) causes silent failures
+- Always test with a fresh Tampermonkey profile to catch grant issues
+
+### G) Ghost behaviour from uncleared timers/observers
+- Not cleaning up `setInterval`/`setTimeout`/`MutationObserver` on disable causes:
+  - Memory leaks
+  - Duplicate actions on SPA navigation
+  - Interference with other scripts
+- Always implement proper teardown:
+  - Track all timers with IDs
+  - Store observer references for disconnection
+  - Use `AbortController` for fetch operations
+
+---
+
+## 18) References (for agents)
 
 - **[API-doc.md](./API-doc.md)** (required reading; authoritative API guidance for all scripts)
 - **[AGENTS-boilerplate.md](./AGENTS-boilerplate.md)** (scaffold, formatting, and shared UI/logging integration rules)
