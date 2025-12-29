@@ -492,3 +492,400 @@ Add new validation logic to `/dev/scripts/lint.js` or `/dev/scripts/test.js`.
 - GreaseSpot metadata block reference (baseline syntax)
 - Violentmonkey metadata reference (compatibility rules)
 - XBrowser user script API reference (Android target compatibility)
+
+---
+
+## 19) Canonical Dependencies & Dependency Hygiene
+
+**Rule:** The same dependency must always come from the same CDN source/version across the entire repository.
+
+### Canonical CDN URLs (enforced by lint)
+
+| Library | Canonical CDN | Notes |
+|---------|---------------|-------|
+| jQuery | `https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js` | Avoid if possible; use vanilla DOM |
+| jQuery UI | `https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js` | Only if jQuery is used |
+| Readability | `https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/Readability.js` | Mozilla's article extractor |
+| Turndown | `https://unpkg.com/turndown@7.2.2/dist/turndown.js` | **UMD build** (not CJS) |
+| Turndown GFM | `https://unpkg.com/turndown-plugin-gfm@1.0.2/dist/turndown-plugin-gfm.js` | **UMD build** |
+
+### Why unpkg for Turndown?
+
+jsdelivr serves CommonJS builds (`turndown.browser.cjs.min.js`) that expect `module.exports`, causing crashes in userscript contexts. unpkg serves proper UMD builds that expose browser globals (`TurndownService`).
+
+### Adding New Dependencies
+
+1. Check if dependency has UMD/browser build (not CommonJS)
+2. Use pinned version (e.g., `@7.2.2` not `@latest`)
+3. Add to canonical list in `/dev/scripts/lint.js`
+4. Document in this section
+5. Use same URL across all scripts
+
+**Never mix CDNs** for the same library (e.g., don't use both googleapis and cdnjs for jQuery).
+
+---
+
+## 20) Performance & Concurrency Best Practices
+
+### Idempotency
+- Every script must be safe to run twice (SPA navigation, hot reloads)
+- Check if already initialized before running setup
+- Use flags like `state.started` to prevent duplicate work
+
+### Non-Blocking Work
+- Never block main thread with large synchronous loops
+- Chunk DOM work with `requestIdleCallback` or `setTimeout(0)`
+- Use `queueMicrotask` for small async tasks
+
+### MutationObservers
+- **Narrow scope**: Target specific containers, not `document.body`
+- **Debounce/throttle**: Batch rapid changes
+- **Disconnectable**: Always store observer references
+- **OFF by default**: For `@match *://*/*`, only observe when Always Run ON or user-triggered
+
+### Intervals/Timeouts
+- **Bounded**: Set hard limits on retries
+- **Cleared on success**: Stop polling when work is done
+- **Exponential backoff**: Increase delay on repeated failures
+- **Never run forever**: Use max iteration counts
+
+### Network Requests
+- **Cancellable**: Use `AbortController` where possible
+- **No auto-work**: Don't fetch on init for `@match *://*/*` scripts
+- **Error handling**: Always catch and log failures
+
+### SPA Navigation
+- Detect route changes: `popstate`, history wrapper, MutationObserver
+- Don't duplicate initialization
+- Don't duplicate observers
+- Clean up old state before re-running
+
+---
+
+## 21) Dormant-by-Default Pattern (REQUIRED for @match *://*/*)
+
+Scripts with broad `@match *://*/*` patterns **must** be dormant by default to prevent performance issues when many scripts run simultaneously.
+
+### Required Implementation
+
+```javascript
+// Constants
+const SCRIPT_ID = 'myscript';
+const ALWAYS_RUN_KEY = `${SCRIPT_ID}.alwaysRun`;
+
+// State
+const state = {
+  enabled: true,
+  started: false,
+  alwaysRun: false,  // DEFAULT: OFF
+  menuIds: []
+};
+
+// Init - LIGHTWEIGHT ONLY
+const init = async () => {
+  state.enabled = await gmStore.get(ENABLE_KEY, true);
+  state.alwaysRun = await gmStore.get(ALWAYS_RUN_KEY, false);
+  
+  // Always register UI/menu (lightweight)
+  registerMenu();
+  
+  if (sharedUi) {
+    sharedUi.registerScript({
+      id: SCRIPT_ID,
+      title: SCRIPT_TITLE,
+      enabled: state.enabled,
+      render: renderPanel,
+      onToggle: (next) => setEnabled(next)
+    });
+  }
+  
+  // ONLY auto-start heavy work if Always Run is ON
+  if (state.enabled && state.alwaysRun) {
+    await start();  // Heavy work: observers, DOM scans, network
+  }
+};
+
+// Heavy work function
+const start = async () => {
+  if (state.started) return;
+  state.started = true;
+  
+  // NOW safe to start:
+  // - MutationObservers over large subtrees
+  // - DOM scanning/extraction
+  // - Network fetches
+  // - Interval polling
+  // - Readability/Turndown processing
+};
+```
+
+### Required UI Elements
+
+**renderPanel must include:**
+- Always Run toggle with clear ON/OFF state
+- Status indicator showing "Dormant" vs "Active"
+- On-demand action buttons (user can trigger work manually)
+
+**Menu must include:**
+- `[ScriptName] ↻ Always Run (ON/OFF)` command
+- Other action commands work regardless of Always Run state
+
+### What Qualifies as "Heavy Work"?
+
+- MutationObservers with `subtree: true` over large DOM sections
+- Document scanning (readability extraction, content parsing)
+- Network requests (API calls, data fetching)
+- Interval/timeout polling
+- Large synchronous DOM manipulation
+- Library initialization (Turndown, Readability setup)
+
+### Exceptions
+
+**Scripts that don't need Always Run:**
+- Specific site scripts (narrow @match like `@match https://chat.openai.com/*`)
+- UI infrastructure (userscriptui.user.js - it IS the foundation)
+- Pure on-demand tools (no auto-work at all, only button-triggered)
+
+---
+
+## 22) Unified UI System (MANDATORY)
+
+**All userscripts must use ONLY the 'userscripts-ui-button' with all controls contained in their respective 'userscripts-tab' within 'userscripts-ui-modal'. No other separate UI elements are allowed.**
+
+### Requirements
+
+- **Single entry point**: The hotpink dock button (`userscripts-ui-button`)
+- **No fallback UI**: Don't create standalone buttons, popups, or overlays
+- **No "if sharedUi missing" fallbacks**: Script must require `userscriptui.user.js`
+- **All controls in panel**: Every setting, button, toggle goes in `renderPanel()`
+
+### Implementation
+
+```javascript
+// Correct: Register with shared UI only
+const renderPanel = () => {
+  const wrapper = document.createElement('div');
+  // ... build UI with buttons, toggles, status ...
+  return wrapper;
+};
+
+// Correct: Menu commands for quick access
+registerMenu();  // Adds Tampermonkey menu items
+
+// WRONG: Don't do this
+const injectFallbackButton = () => {
+  // Creating standalone UI element - NOT ALLOWED
+  const button = document.createElement('button');
+  document.body.appendChild(button);
+};
+```
+
+### Why?
+
+- **Consistency**: Single UI pattern across all scripts
+- **No clutter**: No scattered buttons/popups on pages
+- **Performance**: One UI manager is lightweight
+- **Maintainability**: Single integration point
+
+---
+
+## 23) Common Tampermonkey Pitfalls (CRITICAL)
+
+### A) Parse Failures Stop Injection Entirely
+
+**Symptom:** Script doesn't run at all, no console errors, appears broken.
+
+**Cause:** Syntax error (missing brace, extra `}`, invalid token) prevents Tampermonkey from injecting the script.
+
+**Solution:**
+- Always use `node --check <script>.user.js` before committing
+- CI gates enforce this (see `.github/workflows/ci.yml`)
+- Look for duplicate closing braces in event listeners
+- Check for stray `}, 0);` or `});` fragments
+
+**Example of common error:**
+```javascript
+document.addEventListener('myEvent', () => {
+  // ... code ...
+});
+}, 0);  // EXTRA }, 0); causes parse failure
+```
+
+### B) @require Format Mismatch (CJS vs UMD)
+
+**Symptom:** `Cannot set properties of undefined (setting 'exports')` or `module is not defined`
+
+**Cause:** Loading a CommonJS build that expects Node.js `module.exports` / `require()`.
+
+**Solution:**
+- Use UMD builds that expose browser globals
+- For Turndown: Use `https://unpkg.com/turndown@7.2.2/dist/turndown.js` (NOT `.cjs.min.js`)
+- Check library docs for "browser" or "UMD" build
+- Test: library should expose global like `window.TurndownService`
+
+### C) Over-Broad @match + Heavy Work = Page Hangs
+
+**Symptom:** Pages slow to load, high CPU, browser becomes unresponsive.
+
+**Cause:** Script with `@match *://*/*` runs heavy work (DOM scans, observers) on every page load.
+
+**Solution:**
+- Implement dormant-by-default pattern (see Section 21)
+- Use `@run-at document-idle` not `document-start`
+- Only start heavy work when:
+  - Always Run is ON, or
+  - User triggers action via UI/menu
+
+### D) Non-Idempotent Init Breaks SPAs
+
+**Symptom:** Script works on first page load, breaks after navigation (SPA routing).
+
+**Cause:** Not checking if already initialized; observers/listeners added multiple times.
+
+**Solution:**
+```javascript
+const state = { started: false };
+
+const start = async () => {
+  if (state.started) return;  // Idempotency guard
+  state.started = true;
+  
+  // Safe to initialize now
+};
+```
+
+### E) Unbounded Observers/Intervals Leak Resources
+
+**Symptom:** Memory grows over time, CPU usage increases, browser slows down.
+
+**Cause:** Observers/intervals not disconnected/cleared when no longer needed.
+
+**Solution:**
+```javascript
+const observers = [];
+const timers = [];
+
+const observer = new MutationObserver(callback);
+observer.observe(target, config);
+observers.push(observer);
+
+const timer = setInterval(check, 1000);
+timers.push(timer);
+
+// Cleanup
+const teardown = () => {
+  observers.forEach(obs => obs.disconnect());
+  observers.length = 0;
+  timers.forEach(id => clearInterval(id));
+  timers.length = 0;
+};
+```
+
+### F) Not Guarding GM_* Usage
+
+**Symptom:** Script works in Tampermonkey but crashes in Violentmonkey or vice versa.
+
+**Cause:** Different managers have different API support and behavior.
+
+**Solution:**
+```javascript
+// Always check before using
+if (typeof GM_registerMenuCommand === 'function') {
+  GM_registerMenuCommand('My Command', handler);
+}
+
+// Use compatibility wrapper
+const GMX = {
+  async getValue(key, def) {
+    return typeof GM !== 'undefined' && GM.getValue 
+      ? GM.getValue(key, def) 
+      : GM_getValue(key, def);
+  }
+};
+```
+
+### G) CSS Selector Fragility
+
+**Symptom:** Script works today, breaks tomorrow after site updates.
+
+**Cause:** Relying on generated class names or deep DOM structure.
+
+**Solution:**
+- Prefer attribute selectors: `[data-testid="message"]`
+- Use semantic attributes: `[role="textbox"]`, `[aria-label="Send"]`
+- Avoid: `.css-abc123-Message`, `div > div > div:nth-child(3)`
+- Store selectors as constants for easy updates
+
+### H) Duplicate Shared UI Bootstrap
+
+**Symptom:** Multiple scripts trying to initialize shared UI, conflicts.
+
+**Cause:** Copy-pasted bootstrap code with slight variations.
+
+**Solution:**
+- Use canonical bootstrap pattern (see AGENTS-boilerplate.md)
+- Listen for `userscriptSharedUiReady` event exactly once
+- Don't duplicate `setTimeout(() => { ... }, 0)` wrappers
+- Check `registrationAttempted` flag before re-registering
+
+---
+
+## 24) Testing & Validation
+
+### Before Committing
+
+1. **Syntax check:** `node --check *.user.js`
+2. **Lint:** `cd dev && npm run lint`
+3. **Tests:** `cd dev && npm run test`
+4. **Manual test:** Install in Tampermonkey, verify on target site
+
+### CI Gates (Enforced)
+
+- All `*.user.js` pass `node --check`
+- Lint checks metadata, dependencies, patterns
+- Tests validate structure, grants, conventions
+- See `.github/workflows/ci.yml`
+
+### Test Scenarios
+
+- **Cold start**: Fresh Tampermonkey profile
+- **Multiple scripts**: Install all, verify no conflicts
+- **SPA navigation**: Click links, back/forward buttons
+- **Enable/disable**: Toggle script, verify cleanup
+- **Always Run**: Test both ON and OFF states
+- **Menu commands**: Verify all menu items work
+- **Shared UI**: Verify panel displays correctly
+
+---
+
+## 25) Dev Tooling (All in /dev)
+
+### Structure
+
+```
+/dev
+  /scripts
+    lint.js        - Metadata validation, dependency checks
+    test.js        - Pattern tests, structure validation
+  package.json     - npm scripts (lint, test, validate)
+```
+
+### Commands
+
+```bash
+cd dev
+npm run lint      # Check all scripts
+npm run test      # Run tests
+npm run validate  # Both lint + test
+```
+
+### No Build/Bundle Step
+
+- Scripts are used directly from Git
+- Git tags create releases (zip files)
+- No webpack/rollup/esbuild
+- No transpilation
+- Single-file userscripts only
+
+---
+
