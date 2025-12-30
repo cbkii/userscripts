@@ -4,7 +4,7 @@
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTEiIGN5PSIxMSIgcj0iOCIvPjxwYXRoIGQ9Im0yMSAyMS00LjM1LTQuMzUiLz48L3N2Zz4=
 // @description  Google search helper with site filters, file-type filters, site exclusions, and smart dorks.
-// @version      2025.12.30.0116
+// @version      2025.12.30.0130
 // @match        *://www.google.*/search*
 // @match        *://google.*/search*
 // @exclude      *://www.google.*/imghp*
@@ -33,6 +33,9 @@
 // ==/UserScript==
 
 /*
+  LOAD PRIORITY: 6 (Content Enhancement)
+  Site-specific enhancement that runs at document-end after DOM is available.
+  
   Feature summary:
   - Adds a Google search helper with site filters, file-type filters, site exclusions, and smart dorks.
   - All UI is integrated into the shared userscriptui.user.js modal (no standalone UI).

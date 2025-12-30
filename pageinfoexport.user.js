@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PGxpbmUgeDE9IjEyIiB5MT0iMTgiIHgyPSIxMiIgeTI9IjEyIi8+PHBvbHlsaW5lIHBvaW50cz0iOSAxNSAxMiAxOCAxNSAxNSIvPjwvc3ZnPg==
-// @version      2025.12.29.2037
+// @version      2025.12.30.0130
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -26,6 +26,9 @@
 // ==/UserScript==
 
 /*
+  LOAD PRIORITY: 11 (Document Processing)
+  Heavy page data export that runs at document-idle after page is fully interactive.
+  
   Feature summary:
   - Exports page DOM, scripts, styles, and performance data on demand.
   - Provides multiple save paths with a 15-second fallback UI and clipboard/preview helpers.

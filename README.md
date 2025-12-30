@@ -40,6 +40,69 @@ The repository emphasizes:
 
 > Both scripts are optional, but provide enhanced UI and logging features when installed alongside any other scripts in this collection. 
 
+## Load Order & Concurrency
+
+When multiple userscripts run on the same page, **load order matters** for proper operation. Scripts in this repository are designed to handle concurrent execution, but some have dependencies or can conflict if not loaded correctly.
+
+### Recommended Load Order (Priority)
+
+Install scripts in this order for best compatibility:
+
+1. **userscriptui.user.js** — Shared UI framework (must load first if used)
+2. **pageunlock.user.js** — Native API patches (document-start, must load early)
+3. **antiadblock.user.js** — Anti-adblock mitigation (document-start)
+4. **adinteract.user.js** — Ad interaction unlocking (document-start)
+5. **dlcountdown.user.js** — Download countdown bypasses (document-start)
+6. **searchgoogle.user.js** — Google search enhancements (document-end)
+7. **searchduck.user.js** — DuckDuckGo search enhancements (document-end)
+8. **vxdark.user.js** — Router dark mode (document-end)
+9. **pagemd.user.js** — Page to Markdown converter (document-idle)
+10. **chatgptmd.user.js** — ChatGPT export (document-idle)
+11. **pageinfoexport.user.js** — Page metadata export (document-idle)
+12. **userscriptlogs.user.js** — Log viewer (document-idle, should load last)
+
+### Why Load Order Matters
+
+**Foundation Scripts (1-2):** `userscriptui.user.js` exposes a global factory that other scripts discover. `pageunlock.user.js` patches native APIs like `addEventListener` at document-start and must load before other scripts that rely on unpolluted native methods.
+
+**Early Intervention (3-5):** Anti-adblock and interaction scripts modify page behavior at document-start to prevent restrictive scripts from loading. Loading these early ensures they can intercept before the page's defensive code runs.
+
+**Content Enhancement (6-8):** Site-specific scripts enhance search engines and UIs. These load at document-end after DOM is available but before all resources finish.
+
+**Document Processing (9-11):** Heavy scripts that extract/convert content load at document-idle after the page is fully interactive, preventing slowdowns during initial load.
+
+**Utilities (12):** Log viewer depends on other scripts having created log entries, so it loads last.
+
+### Concurrency Safeguards
+
+All scripts in this repository implement these patterns to prevent conflicts:
+
+- **Idempotency guards**: Check if already initialized before running setup
+- **Namespace isolation**: No global variable pollution (except framework scripts)
+- **API patch detection**: Scripts that patch native APIs check if already patched
+- **Event listener deduplication**: Shared UI discovery uses once-only registration
+- **Graceful degradation**: Scripts work independently if dependencies are missing
+
+### Known Conflicts
+
+⚠️ **Critical**: If you enable both `pageunlock.user.js` and `adinteract.user.js`, ensure `pageunlock.user.js` has a higher priority (loads first). Both scripts can patch `addEventListener` in aggressive mode, and the first patch wins.
+
+⚠️ **Note**: Scripts with `@run-at document-start` have access to the page before the DOM exists. They use mutation observers or wait for DOM ready before manipulating elements.
+
+### Verifying Load Order in Tampermonkey
+
+1. Open Tampermonkey dashboard
+2. Drag scripts in the list to reorder them
+3. Scripts at the top load first
+4. Verify by checking console timestamps when DEBUG is enabled
+
+### XBrowser Load Order
+
+XBrowser loads scripts in the order they appear in the script manager list. To reorder:
+1. Open XBrowser script manager
+2. Long-press a script and drag to reorder
+3. Or reinstall scripts in the desired order
+
 ## API and Compatibility
 
 - **XBrowser**: All scripts target maximum compatibility with the built-in Android script manager, using features in [API-doc.md](./API-doc.md).

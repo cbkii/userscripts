@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ad Interaction Gate Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.0842
+// @version      2025.12.30.0130
 // @description  Unlocks ad interaction gates after repeated clicks with optional auto-actions.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTMgM2w3LjA3IDE2Ljk3IDIuNTEtNy4zOSA3LjM5LTIuNTFMMyAzeiIvPjxwYXRoIGQ9Ik0xMyAxM2w2IDYiLz48L3N2Zz4=
@@ -24,6 +24,9 @@
 // ==/UserScript==
 
 /*
+  LOAD PRIORITY: 4 (Early Intervention)
+  Should load after pageunlock.user.js if both are enabled to avoid addEventListener conflicts.
+  
   Feature summary:
   - Unlocks ad interaction gates after repeated user clicks.
   - Can auto-trigger nearby ad elements once the first manual trigger occurs.
@@ -584,6 +587,11 @@
     // Event patching
     const patchEvents = () => {
         if (!config.enableEventPatching) return;
+        // Guard: Don't patch if already patched by this or another script
+        if (EventTarget.prototype.addEventListener.__adinteractPatched) {
+            log('debug', 'addEventListener already patched, skipping');
+            return;
+        }
         const origAdd = EventTarget.prototype.addEventListener;
         EventTarget.prototype.addEventListener = function(type, listener, options) {
             if (type === 'click' && fuzzySelectors.some(sel => this.matches(sel))) {
@@ -591,6 +599,8 @@
             }
             return origAdd.call(this, type, listener, options);
         };
+        // Mark as patched
+        EventTarget.prototype.addEventListener.__adinteractPatched = true;
     };
 
     // Initialize

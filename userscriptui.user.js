@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Shared UI Manager
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.2037
+// @version      2025.12.30.0130
 // @description  Provides a shared hotpink dock + dark modal with per-script tabs, toggles, and persistent layout for all userscripts.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHJlY3QgeD0iMyIgeT0iMyIgd2lkdGg9IjciIGhlaWdodD0iNyIvPjxyZWN0IHg9IjE0IiB5PSIzIiB3aWR0aD0iNyIgaGVpZ2h0PSI3Ii8+PHJlY3QgeD0iMTQiIHk9IjE0IiB3aWR0aD0iNyIgaGVpZ2h0PSI3Ii8+PHJlY3QgeD0iMyIgeT0iMTQiIHdpZHRoPSI3IiBoZWlnaHQ9IjciLz48L3N2Zz4=
@@ -18,6 +18,9 @@
 // ==/UserScript==
 
 /*
+  LOAD PRIORITY: 1 (MUST LOAD FIRST - Foundation)
+  This script provides the shared UI framework that other scripts depend on.
+  
   Feature summary:
   - Shared hotpink dock button with a dark modal container and tabbed panels.
   - Persists dock position and active panel across sessions (GM + localStorage).
