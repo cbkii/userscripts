@@ -461,7 +461,11 @@
               if (dorkItem) {
                 if (dorkItem.isUrlParam) {
                   // URL parameters go in &tbs= for Google
-                  urlParams.tbs = dorkItem.dork;
+                  // Ensure time-based filters are correctly formatted as qdr:<code>, e.g. qdr:d
+                  const tbsValue = typeof dorkItem.dork === 'string' && dorkItem.dork.startsWith('qdr:')
+                    ? dorkItem.dork
+                    : `qdr:${dorkItem.dork}`;
+                  urlParams.tbs = tbsValue;
                 } else if (dorkItem.isPrefix) {
                   prefixOperator = dorkItem.dork;
                 } else {
