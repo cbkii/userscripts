@@ -541,10 +541,17 @@
     // Build query parts
     const queryParts = [];
 
-    // Bangs go at the beginning of the query in DDG
-    bangParts.forEach(bang => {
-      queryParts.push(bang);
-    });
+    // Bangs must be at the very beginning of the DDG query, before any other terms.
+    // Prepend them directly to the base query instead of treating them as regular filters.
+    if (bangParts.length > 0) {
+      const bangPrefix = bangParts.join(' ');
+      if (typeof baseQuery === 'string' && baseQuery.trim().length > 0) {
+        baseQuery = `${bangPrefix} ${baseQuery}`;
+      } else {
+        // If there was no base query, the bangs themselves become the query.
+        baseQuery = bangPrefix;
+      }
+    }
 
     // Sites: in DDG, multiple site: operators must be explicitly ORed (unlike Google in some contexts)
     if (siteParts.length > 0) {
