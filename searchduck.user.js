@@ -4,7 +4,7 @@
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTEiIGN5PSIxMSIgcj0iOCIvPjxwYXRoIGQ9Im0yMSAyMS00LjM1LTQuMzUiLz48L3N2Zz4=
 // @description  DuckDuckGo search helper with site filters, file-type filters, site exclusions, bangs, and smart dorks.
-// @version      2025.12.29.2354
+// @version      2025.12.30.0014
 // @match        *://duckduckgo.com/*
 // @match        *://*.duckduckgo.com/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/searchduck.user.js
@@ -26,7 +26,7 @@
   - All UI is integrated into the shared userscriptui.user.js modal (no standalone UI).
   - Site filters and file types apply as groups; Smart Dorks items are individually selectable.
   - Site exclusions allow filtering out noisy hosts like Pinterest, Facebook, etc.
-  - Includes DuckDuckGo-specific features: !bang shortcuts, safe search toggles, boost/exclude operators.
+  - Includes DuckDuckGo-specific features: !bang shortcuts, safe search toggles, region filters.
   - Properly handles both search field text and URL query-string parameters (df= for dates, kp= for safe search).
 
   How it works:
@@ -45,6 +45,12 @@
   - +term - Boost a term
   - -term - Exclude a term
   - !bang - Jump to another search engine
+  - \query - Jump to first result
+
+  Limitations vs Google:
+  - Fewer supported file types (no archives, video, audio, images, executables, source code)
+  - No cache:, related:, info: operators (use !define bang for definitions)
+  - Wildcard site matches (*.gov.au) not supported, use base domain instead
 
   Configuration:
   - Toggle enable/disable via shared UI or Tampermonkey menu.
@@ -119,45 +125,61 @@
 
   const siteFilters = {
     'File Sharing & Cloud': [
-      '4shared.com','mediafire.com','mega.nz','sendspace.com','uloz.to',
-      'dropbox.com','drive.google.com','onedrive.live.com','box.com','pcloud.com',
-      'wetransfer.com','filemail.com','jumpshare.com'
+      '4shared.com','mediafire.com','mega.nz','sendspace.com','uloz.to','rapidgator.net','nitroflare.com','filefactory.com',
+      'dropbox.com','drive.google.com','onedrive.live.com','box.com','pcloud.com','icedrive.net','filen.io',
+      'wetransfer.com','filemail.com','jumpshare.com','hightail.com','send-anywhere.com',
+      'pixeldrain.com','file.io'
     ],
     'Video Streaming': [
-      'netflix.com','primevideo.com','disneyplus.com','youtube.com','vimeo.com',
-      'twitch.tv','dailymotion.com','tubitv.com','pluto.tv','plex.tv'
+      'netflix.com','primevideo.com','disneyplus.com','stan.com.au','binge.com.au','max.com','foxtel.com.au',
+      'youtube.com','vimeo.com','twitch.tv','dailymotion.com',
+      'tubitv.com','crackle.com','pluto.tv','plex.tv','kanopy.com'
     ],
     'Online Shopping (AU)': [
-      'amazon.com.au','ebay.com.au','woolworths.com.au','kmart.com.au','catch.com.au',
+      'amazon.com.au','theiconic.com.au','ebay.com.au','woolworths.com.au','kmart.com.au','catch.com.au','mydeal.com.au',
+      'goodguys.com.au','appliancesonline.com.au','petcircle.com.au',
       'bigw.com.au','harveynorman.com.au','temu.com','shein.com'
     ],
     'Blogs & Writing': [
-      'wordpress.com','blogger.com','medium.com','substack.com','ghost.org','dev.to',
-      'tumblr.com','write.as','blogspot.com'
+      'wordpress.com','blogger.com','medium.com','substack.com','ghost.org','dev.to','hashnode.com',
+      'livejournal.com','tumblr.com','write.as','blogspot.com'
+    ],
+    'Auctions & Marketplace': [
+      'ebay.com.au','grays.com.au','govdeals.com.au','shopgoodwill.com',
+      'gumtree.com.au'
+    ],
+    'Torrents': [
+      'torrentgalaxy.to','thepiratebay.org','1337x.to','yts.mx','torlock.com'
     ],
     'Academic & Research': [
-      'nature.com','ncbi.nlm.nih.gov','jstor.org','sciencedirect.com','springer.com',
-      'arxiv.org','researchgate.net','scholar.google.com','ieee.org','acm.org'
+      'nature.com','ncbi.nlm.nih.gov','jstor.org','sciencedirect.com','springer.com','arxiv.org','researchgate.net',
+      'pubmed.ncbi.nlm.nih.gov','scholar.google.com','ieee.org','acm.org','cambridge.org','oup.com','wiley.com'
     ],
     'Government & Legal (AU)': [
-      'gov.au','legislation.gov.au','austlii.edu.au','aec.gov.au','ato.gov.au',
-      'servicesaustralia.gov.au','treasury.gov.au','health.gov.au'
+      'gov.au','legislation.gov.au','austlii.edu.au','aec.gov.au','ato.gov.au','servicesaustralia.gov.au',
+      'treasury.gov.au','rba.gov.au','aph.gov.au','pmc.gov.au','dfat.gov.au','health.gov.au','data.gov.au'
+    ],
+    'Job Sites (AU)': [
+      'seek.com.au','indeed.com.au','careerone.com.au','apsjobs.gov.au','ethicaljobs.com.au',
+      'workforceaustralia.gov.au','glassdoor.com.au','jora.com'
     ],
     'Developer Resources': [
-      'stackoverflow.com','github.com','gitlab.com','dev.to','developer.mozilla.org',
-      'docs.python.org','learn.microsoft.com'
+      'stackoverflow.com','github.com','gitlab.com','dev.to','developer.mozilla.org','docs.python.org',
+      'learn.microsoft.com','kubernetes.io/docs','reactjs.org','nodejs.org'
     ],
     'News & Media (AU)': [
-      'abc.net.au','smh.com.au','theage.com.au','news.com.au','sbs.com.au',
-      'theguardian.com/australia-news'
+      'abc.net.au','smh.com.au','theage.com.au','theaustralian.com.au','theguardian.com/australia-news',
+      'news.com.au','sbs.com.au/news','crikey.com.au','afr.com'
     ],
     'Forums & Communities': [
-      'reddit.com','whirlpool.net.au','ozbargain.com.au','stackoverflow.com',
-      'stackexchange.com','discord.com'
+      'reddit.com','whirlpool.net.au','ozbargain.com.au','stackoverflow.com','stackexchange.com',
+      'xda-developers.com','productreview.com.au','choice.com.au','discord.com'
     ]
   };
 
   // DuckDuckGo supports fewer file types than Google
+  // Officially supported: pdf, doc(x), xls(x), ppt(x), html
+  // Note: Other file types may work but are not officially documented
   const fileTypeFilters = {
     'Documents': ['pdf', 'doc', 'docx'],
     'Spreadsheets': ['xls', 'xlsx'],
@@ -210,6 +232,8 @@
   };
 
   // DuckDuckGo-adapted smart dorks
+  // Note: DDG supports intitle:, inurl:, site:, filetype:, "exact phrase", +boost, -exclude
+  // DDG does NOT support: cache:, related:, info:, define: (use !define bang instead)
   const smartDorks = {
     'Index Browsing': [
       { label: 'Audio index', dork: 'intitle:"index of" (mp3 OR flac OR wav) "parent directory"' },
@@ -217,10 +241,21 @@
       { label: 'Video index', dork: 'intitle:"index of" (mp4 OR avi OR mkv) "parent directory"' },
       { label: 'Generic index', dork: 'intitle:"index of" "parent directory"' }
     ],
+    'Exposed Files': [
+      { label: 'Gov AU PDFs', dork: 'filetype:pdf site:gov.au' },
+      { label: 'Gov AU budgets', dork: '(filetype:xls OR filetype:xlsx) "budget" site:gov.au' },
+      { label: 'Admin panels', dork: 'inurl:admin OR inurl:login OR inurl:dashboard' },
+      { label: 'Resumes/CVs', dork: '(intitle:"curriculum vitae" OR intitle:"resume") filetype:pdf' }
+    ],
     'Policy & Docs': [
       { label: 'Privacy policies', dork: '"privacy policy" filetype:pdf' },
       { label: 'Terms of service', dork: '"terms of service" OR "terms and conditions" filetype:pdf' },
       { label: 'Data retention', dork: '"data retention" policy filetype:pdf' }
+    ],
+    'Audio Search': [
+      { label: 'Audio index dirs', dork: 'intitle:"index of" (mp3 OR flac OR wav OR ogg) -inurl:php -inurl:html' },
+      { label: 'MP3 parent dirs', dork: '"parent directory" MP3 -html -php' },
+      { label: 'Audio platforms', dork: 'site:soundcloud.com OR site:bandcamp.com OR site:audiomack.com' }
     ],
     'Time Filters': [
       { label: 'Past day', dork: 'd', isUrlParam: true, paramKey: 'df' },
@@ -243,6 +278,10 @@
       { label: 'Videos only', dork: 'videos', isUrlParam: true, paramKey: 'ia' },
       { label: 'News only', dork: 'news', isUrlParam: true, paramKey: 'ia' },
       { label: 'Maps', dork: 'maps', isUrlParam: true, paramKey: 'ia' }
+    ],
+    'Quick Actions': [
+      { label: 'Jump to first result', dork: '\\', isPrefix: true },
+      { label: 'Define (via bang)', dork: '!define ', isPrefix: true }
     ]
   };
 
