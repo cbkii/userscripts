@@ -4,7 +4,7 @@
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTEiIGN5PSIxMSIgcj0iOCIvPjxwYXRoIGQ9Im0yMSAyMS00LjM1LTQuMzUiLz48L3N2Zz4=
 // @description  Google search helper with site filters, file-type filters, site exclusions, and smart dorks.
-// @version      2025.12.29.2354
+// @version      2025.12.30.0116
 // @match        *://www.google.*/search*
 // @match        *://google.*/search*
 // @exclude      *://www.google.*/imghp*
@@ -451,6 +451,9 @@
     });
 
     // Collect dorks
+    // Note: prefixOperator stores only the last selected prefix operator since these are
+    // mutually exclusive (e.g., cache: vs related: vs info: vs define:).
+    // If multiple prefix operators are selected, last one wins by design.
     Object.entries(state.selections.dorks).forEach(([category, dorkSelections]) => {
       if (dorkSelections && typeof dorkSelections === 'object') {
         Object.entries(dorkSelections).forEach(([dorkLabel, selected]) => {
@@ -467,6 +470,7 @@
                     : `qdr:${dorkItem.dork}`;
                   urlParams.tbs = tbsValue;
                 } else if (dorkItem.isPrefix) {
+                  // Prefix operators are prepended to the query (e.g., cache:, related:)
                   prefixOperator = dorkItem.dork;
                 } else {
                   dorkParts.push(dorkItem.dork);
