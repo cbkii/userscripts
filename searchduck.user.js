@@ -526,8 +526,15 @@
               const dorkItem = categoryDorks.find(d => d.label === dorkLabel);
               if (dorkItem) {
                 if (dorkItem.isUrlParam && dorkItem.paramKey) {
-                  // URL parameters for DDG
-                  urlParams[dorkItem.paramKey] = dorkItem.dork;
+                  // URL parameters for DDG. Avoid overwriting an existing, possibly conflicting value.
+                  const existingValue = urlParams[dorkItem.paramKey];
+                  if (existingValue === undefined) {
+                    urlParams[dorkItem.paramKey] = dorkItem.dork;
+                  } else if (existingValue === dorkItem.dork) {
+                    // Same value already set; nothing to change.
+                  } else {
+                    // Conflicting value already set for this key; keep the first one.
+                  }
                 } else {
                   dorkParts.push(dorkItem.dork);
                 }
