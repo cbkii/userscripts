@@ -705,7 +705,7 @@ const createCustomOverlay = () => {
 ### Enforcement
 
 Code review and agents MUST reject PRs that:
-- Create any DOM elements outside of `renderPanel()`
+- Create any DOM elements for UI outside of the `renderPanel()` function
 - Add fixed/absolute positioned elements to the page
 - Create overlay/modal elements with custom IDs
 - Add event listeners for UI elements not in shared UI panel
