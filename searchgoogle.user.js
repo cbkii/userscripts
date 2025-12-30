@@ -491,9 +491,21 @@
       queryParts.push(`(${fileTypeParts.join(' OR ')})`);
     }
 
-    // Dorks: add each as separate term (they typically include their own operators)
+    // Dorks: add each as separate term; wrap complex OR expressions in parentheses
     dorkParts.forEach(dork => {
-      queryParts.push(dork);
+      const trimmed = typeof dork === 'string' ? dork.trim() : dork;
+      // If the dork contains an OR operator and is not already wrapped in parentheses,
+      // wrap it to avoid ambiguous precedence when combined with other terms.
+      const hasOrOperator = typeof trimmed === 'string' && /\sOR\s/i.test(trimmed);
+      const isWrapped =
+        typeof trimmed === 'string' &&
+        trimmed.startsWith('(') &&
+        trimmed.endsWith(')');
+      if (hasOrOperator && !isWrapped) {
+        queryParts.push(`(${trimmed})`);
+      } else {
+        queryParts.push(dork);
+      }
     });
 
     // Exclusions: add each as separate -site: term
