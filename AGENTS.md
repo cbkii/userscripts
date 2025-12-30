@@ -650,14 +650,20 @@ const start = async () => {
 
 ## 22) Unified UI System (MANDATORY)
 
-**All userscripts must use ONLY the 'userscripts-ui-button' with all controls contained in their respective 'userscripts-tab' within 'userscripts-ui-modal'. No other separate UI elements are allowed.**
+**CRITICAL: All userscripts must use ONLY the 'userscripts-ui-button' with all controls contained in their respective 'userscripts-tab' within 'userscripts-ui-modal'. NO separate UI elements are allowed — this means NO floating action buttons (FABs), NO standalone overlays, NO custom panels, and NO popup windows. The shared UI modal is the ONLY permitted user interface for all userscripts in this repository.**
 
 ### Requirements
 
-- **Single entry point**: The hotpink dock button (`userscripts-ui-button`)
-- **No fallback UI**: Don't create standalone buttons, popups, or overlays
-- **No "if sharedUi missing" fallbacks**: Script must require `userscriptui.user.js`
-- **All controls in panel**: Every setting, button, toggle goes in `renderPanel()`
+- **Single entry point**: The hotpink dock button (`userscripts-ui-button`) provided by `userscriptui.user.js`
+- **No standalone UI**: Scripts must NOT create:
+  - Floating action buttons (FABs)
+  - Standalone overlays or modals
+  - Custom sidebar panels
+  - Pop-up windows or tooltips with controls
+  - Fixed-position buttons or icons
+- **No fallback UI**: Don't create "if sharedUi missing" fallback interfaces
+- **All controls in panel**: Every setting, button, toggle, and display goes in `renderPanel()`
+- **Menu commands only for shortcuts**: Tampermonkey menu commands are allowed for quick access, but NOT as replacement for shared UI
 
 ### Implementation
 
@@ -672,20 +678,37 @@ const renderPanel = () => {
 // Correct: Menu commands for quick access
 registerMenu();  // Adds Tampermonkey menu items
 
-// WRONG: Don't do this
+// WRONG: Don't do this - NO standalone UI
 const injectFallbackButton = () => {
   // Creating standalone UI element - NOT ALLOWED
   const button = document.createElement('button');
-  document.body.appendChild(button);
+  document.body.appendChild(button);  // VIOLATION
+};
+
+// WRONG: Don't do this - NO custom overlays
+const createCustomOverlay = () => {
+  const overlay = document.createElement('div');
+  overlay.id = 'my-custom-ui';  // VIOLATION - use shared UI only
+  document.body.appendChild(overlay);
 };
 ```
 
-### Why?
+### Why This Rule Exists
 
-- **Consistency**: Single UI pattern across all scripts
-- **No clutter**: No scattered buttons/popups on pages
-- **Performance**: One UI manager is lightweight
-- **Maintainability**: Single integration point
+- **Consistency**: Single unified UI pattern across all scripts
+- **No visual clutter**: Users don't see scattered buttons/panels on pages
+- **Performance**: One lightweight UI manager instead of N separate UIs
+- **Maintainability**: Single integration point for all scripts
+- **User experience**: Users learn one interface, not N different ones
+- **Mobile-friendly**: Shared UI is tested on mobile; custom UIs often break
+
+### Enforcement
+
+Code review and agents MUST reject PRs that:
+- Create any DOM elements for UI outside of the `renderPanel()` function
+- Add fixed/absolute positioned elements to the page
+- Create overlay/modal elements with custom IDs
+- Add event listeners for UI elements not in shared UI panel
 
 ---
 
