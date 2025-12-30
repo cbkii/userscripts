@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Page Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.2328
+// @version      2025.12.30.0146
 // @description  Unlock text selection, copy/paste, and context menu on restrictive sites. Optional overlay buster + aggressive mode. Lightweight + SPA-friendly.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHJlY3QgeD0iMyIgeT0iMTEiIHdpZHRoPSIxOCIgaGVpZ2h0PSIxMSIgcng9IjIiIHJ5PSIyIi8+PHBhdGggZD0iTTcgMTFWN2E1IDUgMCAwIDEgOS45LTEiLz48L3N2Zz4=
@@ -22,6 +22,9 @@
 // ==/UserScript==
 
 /*
+  LOAD PRIORITY: 2 (Early - Native API Patches)
+  Must load before scripts that patch addEventListener to avoid conflicts.
+  
   Feature summary:
   - Unlocks text selection, copy/paste, and right-click context menu on restrictive sites.
   - Removes annoying full-screen overlays that block content access.
@@ -106,6 +109,7 @@
   let isHostDisabled = cfg.disabledHosts.includes(host);
   const state = {
     menuIds: [],
+    observers: [], // Track MutationObservers for cleanup
   };
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
   const MENU_PREFIX = '[Unlock]';
@@ -207,7 +211,7 @@
         // Register/re-register if ready and not already done
         attemptSharedUiRegistration();
       }, 0);
-    });
+    }, { once: true });
   }
 
 
@@ -222,7 +226,21 @@
       sharedUi.setScriptEnabled(SCRIPT_ID, cfg.enabled);
     }
     registerMenu();
+    // Cleanup observers before reload
+    disconnectObservers();
     location.reload();
+  }
+
+  function disconnectObservers() {
+    // Disconnect all tracked MutationObservers
+    if (state.observers && state.observers.length > 0) {
+      state.observers.forEach(observer => {
+        try {
+          observer.disconnect();
+        } catch (_) {}
+      });
+      state.observers = [];
+    }
   }
 
   function setAlwaysRun(next) {
@@ -707,6 +725,8 @@
       if (head) {
         headWatcher.observe(head, { childList: true });
         ensureStyleLast();
+        // Track long-running observer for cleanup
+        state.observers.push(headWatcher);
         return true;
       }
       return false;
@@ -718,6 +738,7 @@
         if (attachHeadWatcher()) wait.disconnect();
       });
       wait.observe(document.documentElement, { childList: true, subtree: true });
+      // Don't track 'wait' - it disconnects itself
     }
 
     // 2) Remove newly-added inline handlers for the key events.
@@ -751,6 +772,8 @@
       attributes: true,
       attributeFilter: attrFilter,
     });
+    // Track long-running observer for cleanup
+    state.observers.push(attrWatcher);
 
     // 3) Overlay buster for new nodes (cheap incremental scan).
     if (cfg.overlayBuster) {
@@ -766,6 +789,8 @@
       const attachBody = () => {
         if (document.body) {
           overlayWatcher.observe(document.body, { childList: true, subtree: true });
+          // Track long-running observer for cleanup
+          state.observers.push(overlayWatcher);
           return true;
         }
         return false;
@@ -776,6 +801,7 @@
           if (attachBody()) waitBody.disconnect();
         });
         waitBody.observe(document.documentElement, { childList: true, subtree: true });
+        // Don't track 'waitBody' - it disconnects itself
       }
     }
   }

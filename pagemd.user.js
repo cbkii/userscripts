@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.29.2003
+// @version      2025.12.30.0146
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PHBhdGggZD0iTTEwIDEzaDQiLz48cGF0aCBkPSJNMTAgMTdoNCIvPjxwYXRoIGQ9Ik0xMCA5aDIiLz48L3N2Zz4=
@@ -26,6 +26,9 @@
 // ==/UserScript==
 
 /*
+  LOAD PRIORITY: 9 (Document Processing)
+  Heavy content extraction that runs at document-idle after page is fully interactive.
+  
   Feature summary:
   - Extracts the primary article/content block, filters out nav/ads/comments, and rewrites relative URLs to absolute ones.
   - Converts the cleaned content to Markdown with GFM (tables, fenced code, strikethrough, task lists) using Turndown.
@@ -734,7 +737,7 @@
           }
         }
       }, 0);
-    });
+    }, { once: true });
   }
 
   const state = {
