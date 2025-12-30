@@ -687,7 +687,7 @@
       );
       exclusionContent.appendChild(row);
     });
-    panel.appendChild(createSection('🚫', 'Site Exclusions (Remove Noise)', exclusionContent, false));
+    panel.appendChild(createSection('🚫', 'Site Exclusions (Remove Noise)', exclusionContent));
 
     // Site Filters section
     const siteContent = document.createElement('div');
