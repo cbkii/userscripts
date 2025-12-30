@@ -546,9 +546,9 @@
       queryParts.push(bang);
     });
 
-    // Sites: in DDG, multiple site: operators are implicitly ORed
+    // Sites: in DDG, multiple site: operators must be explicitly ORed (unlike Google in some contexts)
     if (siteParts.length > 0) {
-      // For DDG, we can use (site:a OR site:b) syntax
+      // For DDG, build (site:a OR site:b) with explicit OR operators between site: filters
       queryParts.push(`(${siteParts.join(' OR ')})`);
     }
 
