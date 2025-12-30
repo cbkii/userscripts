@@ -4,7 +4,7 @@
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTEiIGN5PSIxMSIgcj0iOCIvPjxwYXRoIGQ9Im0yMSAyMS00LjM1LTQuMzUiLz48L3N2Zz4=
 // @description  DuckDuckGo search helper with site filters, file-type filters, site exclusions, bangs, and smart dorks.
-// @version      2025.12.30.0130
+// @version      2025.12.30.0146
 // @match        *://duckduckgo.com/*
 // @match        *://*.duckduckgo.com/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/searchduck.user.js
@@ -365,7 +365,7 @@
           }
         }
       }, 0);
-    });
+    }, { once: true });
   }
 
   const state = {

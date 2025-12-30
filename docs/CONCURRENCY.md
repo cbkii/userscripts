@@ -40,7 +40,7 @@ When 12+ userscripts run concurrently on a single page, several categories of co
 
 **Mitigation:** Event fires once, scripts check `registrationAttempted` flag.
 
-**Status:** ⚠️ Acceptable pattern, could be optimized with `{ once: true }`
+**Status:** ✅ Implemented - All scripts now use `{ once: true }` option for automatic cleanup
 
 ---
 
@@ -50,7 +50,7 @@ When 12+ userscripts run concurrently on a single page, several categories of co
 
 **Mitigation:** One-time observers disconnect after completion. Heavy observers use dormant-by-default pattern.
 
-**Status:** ⚠️ Partial - one-time observers clean up, long-running observers are permanent
+**Status:** ✅ Implemented - Long-running observers tracked and disconnected on script disable
 
 ---
 
@@ -113,8 +113,8 @@ When 12+ userscripts run concurrently on a single page, several categories of co
 
 ## Future Improvements
 
-- [ ] Add `{ once: true }` to userscriptSharedUiReady listeners
-- [ ] Implement MutationObserver disconnect on script disable
+- [x] Add `{ once: true }` to userscriptSharedUiReady listeners
+- [x] Implement MutationObserver disconnect on script disable
 - [ ] Add timer/interval tracking and cleanup
 - [ ] Create shared mutex for API patching
 - [ ] Add performance monitoring
@@ -122,5 +122,5 @@ When 12+ userscripts run concurrently on a single page, several categories of co
 ---
 
 **Last Updated:** 2025-12-30  
-**Version:** 1.0  
+**Version:** 1.1  
 **Maintained by:** cbkii

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ad Interaction Gate Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.30.0130
+// @version      2025.12.30.0146
 // @description  Unlocks ad interaction gates after repeated clicks with optional auto-actions.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTMgM2w3LjA3IDE2Ljk3IDIuNTEtNy4zOSA3LjM5LTIuNTFMMyAzeiIvPjxwYXRoIGQ9Ik0xMyAxM2w2IDYiLz48L3N2Zz4=
@@ -152,7 +152,7 @@
             }
           }
         }, 0);
-      });
+      }, { once: true });
     }
     const state = {
         enabled: true,
