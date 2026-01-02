@@ -115,35 +115,80 @@
       return false;
     };
 
-    // Try immediate detection
-    initSharedUi();
+    const tryRegisterScript = () => {
+      if (sharedUi && typeof state !== 'undefined' && 
+          typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+        if (!registrationAttempted) {
+          registrationAttempted = true;
+          sharedUi.registerScript({
+            id: SCRIPT_ID,
+            title: SCRIPT_TITLE,
+            enabled: state.enabled,
+            render: renderPanel,
+            onToggle: (next) => setEnabled(next)
+          });
+          // Clean up resources after successful registration
+          clearPollTimeout();
+          removeEventListener();
+        }
+      }
+    };
 
-    // Listen for shared UI ready event with proper detail consumption
-    document.addEventListener('userscriptSharedUiReady', (event) => {
-      setTimeout(() => {
-        // Try to get factory from event detail first
-        const providedFactory = event?.detail?.sharedUi;
-        
-        if (!sharedUiReady) {
-          initSharedUi(providedFactory);
-        }
-        
-        // Register/re-register if ready and not already done
-        if (sharedUi && typeof state !== 'undefined' && 
-            typeof renderPanel === 'function' && typeof setEnabled === 'function') {
-          if (!registrationAttempted) {
-            registrationAttempted = true;
-            sharedUi.registerScript({
-              id: SCRIPT_ID,
-              title: SCRIPT_TITLE,
-              enabled: state.enabled,
-              render: renderPanel,
-              onToggle: (next) => setEnabled(next)
-            });
-          }
-        }
-      }, 0);
-    }, { once: true });
+    // Try immediate detection (for scripts that load after userscriptui.user.js)
+    if (initSharedUi()) {
+      tryRegisterScript();
+    }
+
+    let eventListenerRef = null;
+    const removeEventListener = () => {
+      if (eventListenerRef) {
+        document.removeEventListener('userscriptSharedUiReady', eventListenerRef);
+        eventListenerRef = null;
+      }
+    };
+
+    // Listen for shared UI ready event - REMOVED { once: true } to handle multiple events
+    // and race conditions with load order
+    eventListenerRef = (event) => {
+      // Try to get factory from event detail first
+      const providedFactory = event?.detail?.sharedUi;
+      
+      if (!sharedUiReady) {
+        initSharedUi(providedFactory);
+      }
+      
+      // Always try registration when event fires (idempotent)
+      tryRegisterScript();
+    };
+    document.addEventListener('userscriptSharedUiReady', eventListenerRef);
+    
+    // Polling fallback for race conditions where event already fired
+    // or userscriptui.user.js loads after this script
+    let pollAttempts = 0;
+    const maxPollAttempts = 20; // Poll for up to 2 seconds
+    const pollInterval = 100;
+    let pollTimeoutId = null;
+
+    const clearPollTimeout = () => {
+      if (pollTimeoutId !== null) {
+        clearTimeout(pollTimeoutId);
+        pollTimeoutId = null;
+      }
+    };
+
+    const pollForSharedUi = () => {
+      if (sharedUiReady || pollAttempts >= maxPollAttempts) {
+        clearPollTimeout();
+        return;
+      }
+      pollAttempts++;
+      if (initSharedUi()) {
+        tryRegisterScript();
+      } else {
+        pollTimeoutId = setTimeout(pollForSharedUi, pollInterval);
+      }
+    };
+    pollTimeoutId = setTimeout(pollForSharedUi, pollInterval);
   }
   const state = {
     enabled: true,
