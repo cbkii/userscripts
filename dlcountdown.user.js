@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.02.0249
+// @version      2026.01.02.0412
 // @description  Accelerates download countdown timers with comprehensive file-host verification support (FreeDlink, Rapidgator, Uploaded, etc).
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cG9seWxpbmUgcG9pbnRzPSIxMiA2IDEyIDEyIDE2IDE0Ii8+PC9zdmc+
@@ -94,10 +94,28 @@
         }
     };
     // Robust shared UI detection across sandbox boundaries
-    // Try to use helper from userscriptui.user.js if available, otherwise use fallback
+    // Deferred registration pattern for document-start scripts
     let sharedUi = null;
     let sharedUiReady = false;
     let registrationAttempted = false;
+    let pendingRegistration = null;
+
+    // Deferred registration function to be called after state/renderPanel/setEnabled are defined
+    const tryRegisterWithSharedUi = () => {
+      if (registrationAttempted || !sharedUi) return;
+      
+      // Only register if we have all required components
+      if (typeof state !== 'undefined' && typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+        registrationAttempted = true;
+        sharedUi.registerScript({
+          id: SCRIPT_ID,
+          title: SCRIPT_TITLE,
+          enabled: state.enabled,
+          render: renderPanel,
+          onToggle: (next) => setEnabled(next)
+        });
+      }
+    };
 
     // Check if userscriptui.user.js provides the helper (reduces code duplication)
     const factory = (typeof window !== 'undefined' && window.__userscriptSharedUi) || 
@@ -112,9 +130,8 @@
         onReady: (ui, tryRegister) => {
           sharedUi = ui;
           sharedUiReady = true;
-          if (typeof state !== 'undefined' && typeof renderPanel === 'function' && typeof setEnabled === 'function') {
-            tryRegister(renderPanel, (next) => setEnabled(next), state.enabled);
-          }
+          // Store the tryRegister function for deferred use
+          pendingRegistration = tryRegister;
         }
       });
       sharedUi = helper.sharedUi;
@@ -1253,15 +1270,14 @@
     // INITIALIZATION
     //////////////////////////////////////////////////////////////
 
-    if (sharedUi && !registrationAttempted) {
+    // Try registration now that state/renderPanel/setEnabled are defined
+    if (pendingRegistration && typeof pendingRegistration === 'function') {
+        // Use the helper's tryRegister function if available
+        pendingRegistration(renderPanel, (next) => setEnabled(next), state.enabled);
         registrationAttempted = true;
-        sharedUi.registerScript({
-            id: SCRIPT_ID,
-            title: SCRIPT_TITLE,
-            enabled: state.enabled,
-            render: renderPanel,
-            onToggle: (next) => setEnabled(next)
-        });
+    } else {
+        // Direct registration if shared UI is already available
+        tryRegisterWithSharedUi();
     }
     
     // Fallback UI for XBrowser/environments without GM_registerMenuCommand
