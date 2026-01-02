@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.02.0219
+// @version      2026.01.02.0237
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDIyczgtNCA4LTEwVjVsLTgtMy04IDN2N2MwIDYgOCAxMCA4IDEweiIvPjwvc3ZnPg==
@@ -1588,6 +1588,40 @@
       } else {
         once();
         setTimeout(once, 1200);
+      }
+
+      // FreeDlink-specific: Spoof adblock detection
+      if (HOST.endsWith('fredl.ru') || HOST.endsWith('freedl.ink')) {
+        const spoofAdblockDetection = () => {
+          try {
+            const adblockField = document.getElementById('adblock_detected');
+            if (adblockField && adblockField.value !== '0') {
+              adblockField.value = '0';
+              dbg('FreeDlink: Set adblock_detected = 0');
+            }
+          } catch (_) {}
+        };
+        
+        // Run immediately and on DOM changes
+        spoofAdblockDetection();
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', spoofAdblockDetection, { once: true });
+        }
+        
+        // Also watch for field being added dynamically
+        const adblockObserver = new MutationObserver(() => {
+          spoofAdblockDetection();
+        });
+        
+        if (document.body) {
+          adblockObserver.observe(document.body, { childList: true, subtree: true });
+        } else {
+          document.addEventListener('DOMContentLoaded', () => {
+            if (document.body) {
+              adblockObserver.observe(document.body, { childList: true, subtree: true });
+            }
+          }, { once: true });
+        }
       }
 
     } catch (e) {

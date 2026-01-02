@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.02.0219
-// @description  Accelerates download countdown timers and enables download controls with FreeDlink ad-verification support.
+// @version      2026.01.02.0237
+// @description  Accelerates download countdown timers with FreeDlink createAds API support (ad-block detection handled by antiadblock script).
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cG9seWxpbmUgcG9pbnRzPSIxMiA2IDEyIDEyIDE2IDE0Ii8+PC9zdmc+
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:up|down|load|dl|mirror|drain|transfer)[a-z0-9-]*|[a-z0-9-]*(?:up|down|load|dl|mirror|drain|transfer))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
@@ -32,18 +32,20 @@
   - Accelerates common download countdown timers.
   - Enables disabled download controls when timers finish.
   - Provides a menu toggle and keyboard shortcut (acceleration starts only when enabled).
-  - FreeDlink/Freedl.ink support: Auto-populates ad-verification fields for successful downloads.
+  - FreeDlink/Freedl.ink support: Auto-calls createAds API to populate verification fields.
+  - Works with antiadblock.user.js which handles adblock_detected field spoofing.
   - XBrowser compatible with localStorage fallback when GM APIs unavailable.
 
   How it works:
   - Hooks timers, detects countdown-like delays, and shortens them when enabled.
   - Scans the DOM for timer elements and updates them faster.
-  - On FreeDlink: Automatically calls createAds API and populates required verification fields.
+  - On FreeDlink: Automatically calls createAds API and populates adsOnlinehash/level fields.
+  - Ad-block detection spoofing is handled by the antiadblock script.
 
   Configuration:
   - Adjust ACCELERATION_FACTOR and related constants inside main().
   - Default state is disabled; use the userscript menu or shortcut to enable.
-  - FreeDlink ad-verification is automatic (user still solves captcha manually).
+  - FreeDlink createAds API call is automatic (user still solves captcha manually).
 */
 
 (function() {
@@ -317,15 +319,6 @@
                 }, timeout);
             });
         };
-        
-        // Ensure adblock_detected is set to 0
-        setTimeout(() => {
-            const adblockField = doc.getElementById('adblock_detected');
-            if (adblockField) {
-                adblockField.value = '0';
-                log('info', 'FreeDlink: Set adblock_detected = 0');
-            }
-        }, 100);
         
         // Auto-populate ad verification fields
         if (typeof GM_xmlhttpRequest === 'function') {
