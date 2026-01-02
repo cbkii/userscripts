@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.02.0107
+// @version      2026.01.02.0134
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PHBhdGggZD0iTTEwIDEzaDQiLz48cGF0aCBkPSJNMTAgMTdoNCIvPjxwYXRoIGQ9Ik0xMCA5aDIiLz48L3N2Zz4=
@@ -61,6 +61,7 @@
   const ALWAYS_RUN_KEY = `${SCRIPT_ID}.alwaysRun`;
   const DEFAULT_FILENAME = 'page.md';
   const POST_IDLE_DELAY_MS = 350;
+  const MAX_DATA_URL_FILE_SIZE_BYTES = 2097152; // 2MB - max file size for data URL conversion on mobile
 
   //////////////////////////////////////////////////////////////
   // UTILITIES & HELPERS
@@ -593,7 +594,7 @@
     try {
       const blob = resource.getBlob();
       // Only convert to data URL if size is reasonable (< 2MB for mobile compatibility)
-      if (blob.size < 2097152) {
+      if (blob.size < MAX_DATA_URL_FILE_SIZE_BYTES) {
         const reader = new FileReader();
         const dataUrlPromise = new Promise((resolve, reject) => {
           reader.onload = () => resolve(reader.result);
@@ -602,12 +603,18 @@
         });
         try {
           downloadUrl = await dataUrlPromise;
-        } catch (_) {
+        } catch (err) {
+          if (DEBUG) {
+            logWarn('Failed to convert blob to data URL, falling back to blob URL', { error: err?.message || String(err) });
+          }
           // Fall back to blob URL if data URL conversion fails
           downloadUrl = resource.getUrl();
         }
       }
-    } catch (_) {
+    } catch (err) {
+      if (DEBUG) {
+        logWarn('Error while preparing download URL, using original blob URL', { error: err?.message || String(err) });
+      }
       // Use blob URL if any error occurs
     }
     
@@ -746,6 +753,9 @@
             render: renderPanel,
             onToggle: (next) => setEnabled(next)
           });
+          // Clean up resources after successful registration
+          clearPollTimeout();
+          removeEventListener();
         }
       }
     };
@@ -755,9 +765,17 @@
       tryRegisterScript();
     }
 
+    let eventListenerRef = null;
+    const removeEventListener = () => {
+      if (eventListenerRef) {
+        document.removeEventListener('userscriptSharedUiReady', eventListenerRef);
+        eventListenerRef = null;
+      }
+    };
+
     // Listen for shared UI ready event - REMOVED { once: true } to handle multiple events
     // and race conditions with load order
-    document.addEventListener('userscriptSharedUiReady', (event) => {
+    eventListenerRef = (event) => {
       // Try to get factory from event detail first
       const providedFactory = event?.detail?.sharedUi;
       
@@ -767,25 +785,36 @@
       
       // Always try registration when event fires (idempotent)
       tryRegisterScript();
-    });
+    };
+    document.addEventListener('userscriptSharedUiReady', eventListenerRef);
     
     // Polling fallback for race conditions where event already fired
     // or userscriptui.user.js loads after this script
     let pollAttempts = 0;
     const maxPollAttempts = 20; // Poll for up to 2 seconds
     const pollInterval = 100;
+    let pollTimeoutId = null;
+
+    const clearPollTimeout = () => {
+      if (pollTimeoutId !== null) {
+        clearTimeout(pollTimeoutId);
+        pollTimeoutId = null;
+      }
+    };
+
     const pollForSharedUi = () => {
       if (sharedUiReady || pollAttempts >= maxPollAttempts) {
+        clearPollTimeout();
         return;
       }
       pollAttempts++;
       if (initSharedUi()) {
         tryRegisterScript();
       } else {
-        setTimeout(pollForSharedUi, pollInterval);
+        pollTimeoutId = setTimeout(pollForSharedUi, pollInterval);
       }
     };
-    setTimeout(pollForSharedUi, pollInterval);
+    pollTimeoutId = setTimeout(pollForSharedUi, pollInterval);
   }
 
   const state = {
