@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.02.0237
+// @version      2026.01.02.0249
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDIyczgtNCA4LTEwVjVsLTgtMy04IDN2N2MwIDYgOCAxMCA4IDEweiIvPjwvc3ZnPg==
@@ -1590,6 +1590,62 @@
         setTimeout(once, 1200);
       }
 
+      // Generic adblock detection field spoofing
+      // Handles common patterns across file hosting sites
+      const spoofGenericAdblockFields = () => {
+        try {
+          // Common adblock detection field names
+          const adblockFieldPatterns = [
+            'adblock_detected',
+            'adblock_active', 
+            'adblocker',
+            'ab_detected',
+            'ad_block',
+            'hasAdblock',
+            'adBlockEnabled'
+          ];
+          
+          adblockFieldPatterns.forEach(fieldId => {
+            const field = document.getElementById(fieldId);
+            if (field && field.tagName === 'INPUT') {
+              // Set to 0 or false depending on field type
+              if (field.type === 'checkbox') {
+                field.checked = false;
+              } else {
+                if (field.value !== '0' && field.value !== 'false') {
+                  field.value = '0';
+                  dbg(`Generic: Set ${fieldId} = 0`);
+                }
+              }
+            }
+            
+            // Also check for fields by name attribute
+            const namedFields = document.querySelectorAll(`input[name="${fieldId}"]`);
+            namedFields.forEach(namedField => {
+              if (namedField.type === 'checkbox') {
+                namedField.checked = false;
+              } else {
+                if (namedField.value !== '0' && namedField.value !== 'false') {
+                  namedField.value = '0';
+                  dbg(`Generic: Set ${fieldId} (by name) = 0`);
+                }
+              }
+            });
+          });
+          
+          // Also spoof common JavaScript adblock detection variables
+          try {
+            if (typeof window !== 'undefined') {
+              // Set common adblock flags to false
+              if ('adblock_detected' in window) window.adblock_detected = false;
+              if ('hasAdBlock' in window) window.hasAdBlock = false;
+              if ('canRunAds' in window) window.canRunAds = true;
+              if ('adsBlocked' in window) window.adsBlocked = false;
+            }
+          } catch (_) {}
+        } catch (_) {}
+      };
+      
       // FreeDlink-specific: Spoof adblock detection
       if (HOST.endsWith('fredl.ru') || HOST.endsWith('freedl.ink')) {
         const spoofAdblockDetection = () => {
@@ -1622,6 +1678,27 @@
             }
           }, { once: true });
         }
+      }
+      
+      // Run generic adblock field spoofing on all sites
+      spoofGenericAdblockFields();
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', spoofGenericAdblockFields, { once: true });
+      }
+      
+      // Watch for dynamically added adblock detection fields
+      const genericObserver = new MutationObserver(() => {
+        spoofGenericAdblockFields();
+      });
+      
+      if (document.body) {
+        genericObserver.observe(document.body, { childList: true, subtree: true });
+      } else {
+        document.addEventListener('DOMContentLoaded', () => {
+          if (document.body) {
+            genericObserver.observe(document.body, { childList: true, subtree: true });
+          }
+        }, { once: true });
       }
 
     } catch (e) {

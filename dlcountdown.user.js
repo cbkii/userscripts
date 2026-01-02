@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.02.0237
-// @description  Accelerates download countdown timers with FreeDlink createAds API support (ad-block detection handled by antiadblock script).
+// @version      2026.01.02.0249
+// @description  Accelerates download countdown timers with comprehensive file-host verification support (FreeDlink, Rapidgator, Uploaded, etc).
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cG9seWxpbmUgcG9pbnRzPSIxMiA2IDEyIDEyIDE2IDE0Ii8+PC9zdmc+
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:up|down|load|dl|mirror|drain|transfer)[a-z0-9-]*|[a-z0-9-]*(?:up|down|load|dl|mirror|drain|transfer))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
@@ -33,6 +33,7 @@
   - Enables disabled download controls when timers finish.
   - Provides a menu toggle and keyboard shortcut (acceleration starts only when enabled).
   - FreeDlink/Freedl.ink support: Auto-calls createAds API to populate verification fields.
+  - Generic file-host support: Handles common verification patterns (hidden fields, tokens, etc).
   - Works with antiadblock.user.js which handles adblock_detected field spoofing.
   - XBrowser compatible with localStorage fallback when GM APIs unavailable.
 
@@ -40,12 +41,13 @@
   - Hooks timers, detects countdown-like delays, and shortens them when enabled.
   - Scans the DOM for timer elements and updates them faster.
   - On FreeDlink: Automatically calls createAds API and populates adsOnlinehash/level fields.
+  - Generic sites: Auto-populates common verification fields like wait_token, download_token, etc.
   - Ad-block detection spoofing is handled by the antiadblock script.
 
   Configuration:
   - Adjust ACCELERATION_FACTOR and related constants inside main().
   - Default state is disabled; use the userscript menu or shortcut to enable.
-  - FreeDlink createAds API call is automatic (user still solves captcha manually).
+  - Site-specific verification is automatic (user still solves captchas manually).
 */
 
 (function() {
@@ -383,6 +385,127 @@
         } else {
             handleFreeDlinkVerification();
         }
+    }
+
+    // Generic file-host verification field handler
+    // Handles common verification patterns across multiple file hosting sites
+    const handleGenericVerificationFields = () => {
+        const doc = (typeof unsafeWindow !== 'undefined' && unsafeWindow.document) || document;
+        
+        // Common verification field patterns found in file hosting sites
+        const verificationFields = [
+            { id: 'wait_token', fallback: () => generateToken() },
+            { id: 'download_token', fallback: () => generateToken() },
+            { id: 'csrf_token', fallback: () => extractFromMeta('csrf-token') },
+            { id: '_token', fallback: () => extractFromMeta('csrf-token') },
+            { id: 'authenticity_token', fallback: () => generateToken() },
+            { id: 'download_verify', fallback: () => '1' },
+            { id: 'time', fallback: () => Date.now().toString() },
+            { id: 'timestamp', fallback: () => Math.floor(Date.now() / 1000).toString() },
+            { name: 'op', fallback: () => 'download2' },
+            { name: 'method_free', fallback: () => 'Free Download' },
+            { name: 'method_premium', fallback: () => '' },
+            { id: 'free', fallback: () => '1' },
+            { id: 'download_free', fallback: () => '1' }
+        ];
+        
+        // Helper to generate a simple token
+        const generateToken = () => {
+            return Array.from({length: 32}, () => 
+                Math.floor(Math.random() * 16).toString(16)
+            ).join('');
+        };
+        
+        // Helper to extract token from meta tags
+        const extractFromMeta = (name) => {
+            const meta = doc.querySelector(`meta[name="${name}"]`);
+            return meta ? meta.getAttribute('content') : generateToken();
+        };
+        
+        // Populate missing verification fields
+        verificationFields.forEach(field => {
+            try {
+                let element = null;
+                
+                if (field.id) {
+                    element = doc.getElementById(field.id);
+                } else if (field.name) {
+                    element = doc.querySelector(`input[name="${field.name}"]`);
+                }
+                
+                if (element && element.tagName === 'INPUT' && !element.value) {
+                    element.value = field.fallback();
+                    log('info', `Auto-populated field: ${field.id || field.name} = ${element.value}`);
+                }
+            } catch (e) {
+                // Ignore errors for individual fields
+            }
+        });
+        
+        // Look for dynamically required fields in data attributes or scripts
+        const scripts = doc.querySelectorAll('script:not([src])');
+        scripts.forEach(script => {
+            try {
+                const content = script.textContent;
+                
+                // Look for common patterns like: var download_token = "..."
+                const tokenMatch = content.match(/(?:var|let|const)\s+(\w*token\w*)\s*=\s*["']([^"']+)["']/i);
+                if (tokenMatch && tokenMatch[1] && tokenMatch[2]) {
+                    const fieldName = tokenMatch[1];
+                    const tokenValue = tokenMatch[2];
+                    
+                    const field = doc.getElementById(fieldName) || doc.querySelector(`input[name="${fieldName}"]`);
+                    if (field && field.tagName === 'INPUT' && !field.value) {
+                        field.value = tokenValue;
+                        log('info', `Auto-populated from script: ${fieldName} = ${tokenValue}`);
+                    }
+                }
+                
+                // Look for session/download verification variables
+                const sessionMatch = content.match(/(?:session|download)_?(?:id|key|verify)\s*[:=]\s*["']([^"']+)["']/i);
+                if (sessionMatch && sessionMatch[1]) {
+                    // Try to find corresponding hidden field
+                    const hiddenFields = doc.querySelectorAll('input[type="hidden"][name*="session"], input[type="hidden"][name*="verify"]');
+                    hiddenFields.forEach(field => {
+                        if (!field.value) {
+                            field.value = sessionMatch[1];
+                            log('info', `Auto-populated session field: ${field.name} = ${sessionMatch[1]}`);
+                        }
+                    });
+                }
+            } catch (e) {
+                // Ignore script parsing errors
+            }
+        });
+    };
+    
+    // Run generic verification field handler
+    const runGenericHandler = () => {
+        handleGenericVerificationFields();
+        
+        // Also watch for dynamically added fields
+        const fieldObserver = new MutationObserver(() => {
+            handleGenericVerificationFields();
+        });
+        
+        if (document.body) {
+            fieldObserver.observe(document.body, { 
+                childList: true, 
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['disabled', 'readonly']
+            });
+            
+            // Disconnect after 30 seconds to avoid performance issues
+            setTimeout(() => fieldObserver.disconnect(), 30000);
+        }
+    };
+    
+    // Run immediately and on DOM ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', runGenericHandler, { once: true });
+    } else {
+        runGenericHandler();
     }
 
     // Configuration
