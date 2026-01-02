@@ -120,6 +120,11 @@ If you find a site where a script doesn’t function, or you spot API/compat iss
 - Code style: modern JS, strict metadata, English-only comments and UI.
 - See PR/commit rules in [AGENTS.md](./AGENTS.md).
 
+### Best Practices & Research
+
+- **[Best Practices Checklist](./docs/BEST-PRACTICES-CHECKLIST.md)** — Quick reference for ensuring scripts meet industry standards.
+- **[Research Findings](./docs/RESEARCH-FINDINGS.md)** — Comprehensive analysis comparing this repository against popular userscript patterns and official documentation.
+
 ---
 
 *Browse, install, and adjust to suit your Android experience!*  
