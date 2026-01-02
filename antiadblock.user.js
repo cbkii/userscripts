@@ -210,6 +210,7 @@
     const pollForSharedUi = () => {
       if (sharedUiReady || pollAttempts >= maxPollAttempts) {
         clearPollTimeout();
+        removeEventListener(); // Clean up event listener on timeout
         return;
       }
       pollAttempts++;
