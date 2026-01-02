@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.02.0158
-// @description  Accelerates download countdown timers and enables download controls with smart detection for captcha sites.
+// @version      2026.01.02.0219
+// @description  Accelerates download countdown timers and enables download controls with FreeDlink ad-verification support.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cG9seWxpbmUgcG9pbnRzPSIxMiA2IDEyIDEyIDE2IDE0Ii8+PC9zdmc+
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:up|down|load|dl|mirror|drain|transfer)[a-z0-9-]*|[a-z0-9-]*(?:up|down|load|dl|mirror|drain|transfer))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
@@ -16,7 +16,10 @@
 // @grant        GM_unregisterMenuCommand
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
+// @connect      fredl.ru
+// @connect      freedl.ink
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
@@ -29,18 +32,18 @@
   - Accelerates common download countdown timers.
   - Enables disabled download controls when timers finish.
   - Provides a menu toggle and keyboard shortcut (acceleration starts only when enabled).
-  - Detects captcha/ad-verification sites and skips acceleration to prevent download failures.
+  - FreeDlink/Freedl.ink support: Auto-populates ad-verification fields for successful downloads.
   - XBrowser compatible with localStorage fallback when GM APIs unavailable.
 
   How it works:
   - Hooks timers, detects countdown-like delays, and shortens them when enabled.
   - Scans the DOM for timer elements and updates them faster.
-  - Skips acceleration on sites with captcha or ad-verification requirements (e.g., FreeDlink).
+  - On FreeDlink: Automatically calls createAds API and populates required verification fields.
 
   Configuration:
   - Adjust ACCELERATION_FACTOR and related constants inside main().
   - Default state is disabled; use the userscript menu or shortcut to enable.
-  - Sites requiring captcha/ads are automatically detected and excluded.
+  - FreeDlink ad-verification is automatic (user still solves captcha manually).
 */
 
 (function() {
@@ -269,57 +272,124 @@
 
     async function main() {
 
-    // Domain exclusion list - sites that require full countdowns for ad/captcha verification
-    const excludedDomains = [
-        'fredl.ru',
-        'freedl.ink',
-        // Add more domains that require captcha/ad verification here
-    ];
+    // FreeDlink/Freedl.ink specific support
+    const isFreeDlink = location.hostname.endsWith('fredl.ru') || location.hostname.endsWith('freedl.ink');
     
-    // Check if current domain is in exclusion list
-    const hostname = location.hostname;
-    if (excludedDomains.some(domain => hostname.endsWith(domain))) {
-        log('info', `Skipping acceleration on ${hostname} - site requires captcha/ad verification`);
-        state.enabled = false;
-        return; // Don't hook timers or modify the DOM
-    }
-    
-    // Detect captcha or ad-verification elements before accelerating
-    // Wait a bit for DOM to be available if we're at document-start
-    const checkForCaptchaOrAds = () => {
+    // FreeDlink ad-verification helper
+    const handleFreeDlinkVerification = async () => {
+        if (!isFreeDlink) return;
+        
         const doc = (typeof unsafeWindow !== 'undefined' && unsafeWindow.document) || document;
+        const win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
         
-        // Check for captcha elements
-        const hasCaptcha = doc.querySelector('.h-captcha, #free-captcha, .g-recaptcha, [class*="captcha"]');
-        
-        // Check for ad verification elements
-        const hasAdCheck = doc.getElementById('adsOnlinehash') || 
-                          doc.getElementById('adblock_detected') ||
-                          doc.getElementById('level') ||
-                          doc.querySelector('[id*="createAds"], [id*="adsblock"]');
-        
-        if (hasCaptcha || hasAdCheck) {
-            log('info', 'Captcha or ad verification detected - timers left intact');
-            state.enabled = false;
-            return true;
+        // Extract file code from URL (e.g., /6blvteuy9wqq)
+        const fileCodeMatch = location.pathname.match(/\/([a-z0-9]{10,})/i);
+        if (!fileCodeMatch) {
+            log('info', 'FreeDlink: No file code found in URL');
+            return;
         }
-        return false;
+        
+        const fileCode = fileCodeMatch[1];
+        log('info', `FreeDlink: Processing file ${fileCode}`);
+        
+        // Wait for DOM to be ready
+        const waitForElement = (selector, timeout = 5000) => {
+            return new Promise((resolve) => {
+                if (doc.querySelector(selector)) {
+                    return resolve(doc.querySelector(selector));
+                }
+                
+                const observer = new MutationObserver(() => {
+                    if (doc.querySelector(selector)) {
+                        observer.disconnect();
+                        resolve(doc.querySelector(selector));
+                    }
+                });
+                
+                observer.observe(doc.body || doc.documentElement, {
+                    childList: true,
+                    subtree: true
+                });
+                
+                setTimeout(() => {
+                    observer.disconnect();
+                    resolve(null);
+                }, timeout);
+            });
+        };
+        
+        // Ensure adblock_detected is set to 0
+        setTimeout(() => {
+            const adblockField = doc.getElementById('adblock_detected');
+            if (adblockField) {
+                adblockField.value = '0';
+                log('info', 'FreeDlink: Set adblock_detected = 0');
+            }
+        }, 100);
+        
+        // Auto-populate ad verification fields
+        if (typeof GM_xmlhttpRequest === 'function') {
+            try {
+                const createAdsUrl = `https://fredl.ru/createAds/${fileCode}/${Math.random()}`;
+                log('info', `FreeDlink: Calling createAds API: ${createAdsUrl}`);
+                
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: createAdsUrl,
+                    onload: function(response) {
+                        try {
+                            const data = JSON.parse(response.responseText);
+                            log('info', 'FreeDlink: createAds response received', data);
+                            
+                            if (data && data.status && data.message) {
+                                // Wait for fields to exist before populating
+                                setTimeout(() => {
+                                    const hashField = doc.getElementById('adsOnlinehash');
+                                    const levelField = doc.getElementById('level');
+                                    
+                                    if (hashField && data.message.hash) {
+                                        hashField.value = data.message.hash;
+                                        log('info', `FreeDlink: Set adsOnlinehash = ${data.message.hash}`);
+                                    }
+                                    
+                                    if (levelField && data.message.level) {
+                                        levelField.value = data.message.level;
+                                        log('info', `FreeDlink: Set level = ${data.message.level}`);
+                                    }
+                                    
+                                    // Optionally open ad link in background (commented out by default)
+                                    // if (data.message.view_ad_link) {
+                                    //     window.open(data.message.view_ad_link, '_blank');
+                                    //     log('info', 'FreeDlink: Opened ad link');
+                                    // }
+                                }, 500);
+                            }
+                        } catch (e) {
+                            log('error', 'FreeDlink: Error parsing createAds response', e);
+                        }
+                    },
+                    onerror: function(error) {
+                        log('error', 'FreeDlink: createAds request failed', error);
+                    }
+                });
+            } catch (e) {
+                log('error', 'FreeDlink: Error calling createAds', e);
+            }
+        } else {
+            log('warn', 'FreeDlink: GM_xmlhttpRequest not available, cannot auto-populate ad verification');
+        }
     };
     
-    // Check immediately if DOM is available
-    if (document.readyState !== 'loading') {
-        if (checkForCaptchaOrAds()) {
-            return; // Don't proceed with acceleration
+    // Call FreeDlink handler if on FreeDlink site
+    if (isFreeDlink) {
+        log('info', 'FreeDlink: Detected FreeDlink site, enabling ad-verification support');
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                handleFreeDlinkVerification();
+            }, { once: true });
+        } else {
+            handleFreeDlinkVerification();
         }
-    } else {
-        // Check after DOM loads
-        document.addEventListener('DOMContentLoaded', () => {
-            if (checkForCaptchaOrAds()) {
-                state.enabled = false;
-                // Stop any acceleration that may have started
-                stop().catch(() => {});
-            }
-        }, { once: true });
     }
 
     // Configuration
