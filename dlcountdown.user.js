@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.30.0146
-// @description  Accelerates download countdown timers and enables download controls.
+// @version      2026.01.02.0158
+// @description  Accelerates download countdown timers and enables download controls with smart detection for captcha sites.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cG9seWxpbmUgcG9pbnRzPSIxMiA2IDEyIDEyIDE2IDE0Ii8+PC9zdmc+
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:up|down|load|dl|mirror|drain|transfer)[a-z0-9-]*|[a-z0-9-]*(?:up|down|load|dl|mirror|drain|transfer))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
@@ -29,14 +29,18 @@
   - Accelerates common download countdown timers.
   - Enables disabled download controls when timers finish.
   - Provides a menu toggle and keyboard shortcut (acceleration starts only when enabled).
+  - Detects captcha/ad-verification sites and skips acceleration to prevent download failures.
+  - XBrowser compatible with localStorage fallback when GM APIs unavailable.
 
   How it works:
   - Hooks timers, detects countdown-like delays, and shortens them when enabled.
   - Scans the DOM for timer elements and updates them faster.
+  - Skips acceleration on sites with captcha or ad-verification requirements (e.g., FreeDlink).
 
   Configuration:
   - Adjust ACCELERATION_FACTOR and related constants inside main().
   - Default state is disabled; use the userscript menu or shortcut to enable.
+  - Sites requiring captcha/ads are automatically detected and excluded.
 */
 
 (function() {
@@ -60,10 +64,26 @@
 
     const gmStore = {
         async get(key, fallback) {
-            try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
+            try { 
+                if (typeof GM_getValue === 'function') {
+                    return await GM_getValue(key, fallback);
+                }
+                // Fallback to localStorage for XBrowser compatibility
+                const stored = localStorage.getItem(key);
+                return stored !== null ? JSON.parse(stored) : fallback;
+            } catch (_) { 
+                return fallback; 
+            }
         },
         async set(key, value) {
-            try { await GM_setValue(key, value); } catch (_) {}
+            try { 
+                if (typeof GM_setValue === 'function') {
+                    await GM_setValue(key, value);
+                } else {
+                    // Fallback to localStorage for XBrowser compatibility
+                    localStorage.setItem(key, JSON.stringify(value));
+                }
+            } catch (_) {}
         }
     };
     // Robust shared UI detection across sandbox boundaries
@@ -248,6 +268,59 @@
     //////////////////////////////////////////////////////////////
 
     async function main() {
+
+    // Domain exclusion list - sites that require full countdowns for ad/captcha verification
+    const excludedDomains = [
+        'fredl.ru',
+        'freedl.ink',
+        // Add more domains that require captcha/ad verification here
+    ];
+    
+    // Check if current domain is in exclusion list
+    const hostname = location.hostname;
+    if (excludedDomains.some(domain => hostname.endsWith(domain))) {
+        log('info', `Skipping acceleration on ${hostname} - site requires captcha/ad verification`);
+        state.enabled = false;
+        return; // Don't hook timers or modify the DOM
+    }
+    
+    // Detect captcha or ad-verification elements before accelerating
+    // Wait a bit for DOM to be available if we're at document-start
+    const checkForCaptchaOrAds = () => {
+        const doc = (typeof unsafeWindow !== 'undefined' && unsafeWindow.document) || document;
+        
+        // Check for captcha elements
+        const hasCaptcha = doc.querySelector('.h-captcha, #free-captcha, .g-recaptcha, [class*="captcha"]');
+        
+        // Check for ad verification elements
+        const hasAdCheck = doc.getElementById('adsOnlinehash') || 
+                          doc.getElementById('adblock_detected') ||
+                          doc.getElementById('level') ||
+                          doc.querySelector('[id*="createAds"], [id*="adsblock"]');
+        
+        if (hasCaptcha || hasAdCheck) {
+            log('info', 'Captcha or ad verification detected - timers left intact');
+            state.enabled = false;
+            return true;
+        }
+        return false;
+    };
+    
+    // Check immediately if DOM is available
+    if (document.readyState !== 'loading') {
+        if (checkForCaptchaOrAds()) {
+            return; // Don't proceed with acceleration
+        }
+    } else {
+        // Check after DOM loads
+        document.addEventListener('DOMContentLoaded', () => {
+            if (checkForCaptchaOrAds()) {
+                state.enabled = false;
+                // Stop any acceleration that may have started
+                stop().catch(() => {});
+            }
+        }, { once: true });
+    }
 
     // Configuration
     const ACCELERATION_FACTOR = 100;  // 100x speed (1000ms becomes 10ms)
@@ -556,46 +629,48 @@
             if (!state.enabled) return;
             
             try {
-                // Pattern 1: Direct DOM manipulation for common sites
-                const commonPatterns = [
-                    // Disable waiting and enable download buttons
-                    () => {
-                        const waitElements = doc.querySelectorAll('[class*="wait"], [id*="wait"]');
-                        waitElements.forEach(el => {
-                            if (el.style) el.style.display = 'none';
-                        });
-                    },
-                    
-                    // Enable disabled download elements
-                    () => {
-                        const disabledElements = doc.querySelectorAll('.disabled, [disabled]');
-                        disabledElements.forEach(el => {
-                            if (el.classList.contains('disabled')) {
+                // Pattern 1: Only hide wait elements with specific timer text patterns
+                // Don't hide ALL elements with "wait" - be selective
+                const waitElements = doc.querySelectorAll('[class*="wait"], [id*="wait"]');
+                waitElements.forEach(el => {
+                    // Only hide if it contains countdown text like "seconds", "wait", etc.
+                    if (el.textContent && /\d+\s*(second|sec|minute|min|wait)/i.test(el.textContent)) {
+                        if (el.style) el.style.display = 'none';
+                    }
+                });
+                
+                // Pattern 2: Enable disabled download elements (but not all disabled elements)
+                // Only target elements that look like download buttons
+                const downloadSelectors = [
+                    'button[disabled][class*="download"]',
+                    'button[disabled][id*="download"]',
+                    'a.disabled[href*="download"]',
+                    'input[type="submit"][disabled][value*="download" i]'
+                ];
+                
+                downloadSelectors.forEach(selector => {
+                    try {
+                        const elements = doc.querySelectorAll(selector);
+                        elements.forEach(el => {
+                            if (el.classList && el.classList.contains('disabled')) {
                                 el.classList.remove('disabled');
                                 el.classList.add('enabled');
                             }
                             if (el.disabled) el.disabled = false;
                         });
-                    },
-                    
-                    // Show hidden download links
-                    () => {
-                        const hiddenDownloads = doc.querySelectorAll('[style*="display: none"], [style*="visibility: hidden"]');
-                        hiddenDownloads.forEach(el => {
-                            if (el.href && el.href.includes('download')) {
-                                el.style.display = '';
-                                el.style.visibility = 'visible';
-                            }
-                        });
+                    } catch (e) {
+                        // Ignore selector errors
                     }
-                ];
+                });
                 
-                // Apply patterns with delay to ensure DOM is ready
-                setTimeout(() => {
-                    commonPatterns.forEach(pattern => {
-                        try { pattern(); } catch (e) { /* ignore */ }
-                    });
-                }, 500);
+                // Pattern 3: Show hidden download links (only actual download links)
+                const hiddenDownloads = doc.querySelectorAll('a[style*="display"][href*="download"], a[style*="visibility"][href*="download"]');
+                hiddenDownloads.forEach(el => {
+                    if (el.href && el.href.includes('download')) {
+                        el.style.display = '';
+                        el.style.visibility = 'visible';
+                    }
+                });
                 
             } catch (e) {
                 // Ignore errors
@@ -957,6 +1032,52 @@
             onToggle: (next) => setEnabled(next)
         });
     }
+    
+    // Fallback UI for XBrowser/environments without GM_registerMenuCommand
+    // Create a simple toggle button when neither shared UI nor menu commands are available
+    const createFallbackUI = () => {
+        if (typeof GM_registerMenuCommand !== 'function' && !sharedUi) {
+            // Wait for body to be available
+            const injectButton = () => {
+                const doc = (typeof unsafeWindow !== 'undefined' && unsafeWindow.document) || document;
+                if (doc.getElementById('dlcnt-toggle')) return; // Already exists
+                
+                const toggle = doc.createElement('button');
+                toggle.id = 'dlcnt-toggle';
+                toggle.textContent = state.enabled ? '⏱️ Timer: ON' : '⏱️ Timer: OFF';
+                toggle.style.cssText = `
+                    position: fixed;
+                    bottom: 10px;
+                    right: 10px;
+                    z-index: 999999;
+                    font-size: 12px;
+                    padding: 8px 12px;
+                    background: ${state.enabled ? '#4CAF50' : '#f44336'};
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    font-weight: 500;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+                `;
+                toggle.addEventListener('click', async () => {
+                    await setEnabled(!state.enabled);
+                    toggle.textContent = state.enabled ? '⏱️ Timer: ON' : '⏱️ Timer: OFF';
+                    toggle.style.background = state.enabled ? '#4CAF50' : '#f44336';
+                });
+                (doc.body || doc.documentElement).appendChild(toggle);
+            };
+            
+            if (document.body) {
+                injectButton();
+            } else {
+                document.addEventListener('DOMContentLoaded', injectButton, { once: true });
+            }
+        }
+    };
+    
+    createFallbackUI();
 
     await setEnabled(state.enabled);
 
