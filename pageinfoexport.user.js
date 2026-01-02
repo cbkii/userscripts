@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PGxpbmUgeDE9IjEyIiB5MT0iMTgiIHgyPSIxMiIgeTI9IjEyIi8+PHBvbHlsaW5lIHBvaW50cz0iOSAxNSAxMiAxOCAxNSAxNSIvPjwvc3ZnPg==
-// @version      2025.12.30.0146
+// @version      2026.01.02.0134
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -58,6 +58,7 @@
   const SCRIPT_TITLE = 'Page Info Export';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
   const ALWAYS_RUN_KEY = `${SCRIPT_ID}.alwaysRun`;
+  const MAX_DATA_URL_FILE_SIZE_BYTES = 2097152; // 2MB - max file size for data URL conversion on mobile
 
   //////////////////////////////////////////////////////////////
   // UTILITIES & HELPERS
@@ -124,35 +125,80 @@
       return false;
     };
 
-    // Try immediate detection
-    initSharedUi();
+    const tryRegisterScript = () => {
+      if (sharedUi && typeof state !== 'undefined' && 
+          typeof renderPanel === 'function' && typeof setEnabled === 'function') {
+        if (!registrationAttempted) {
+          registrationAttempted = true;
+          sharedUi.registerScript({
+            id: SCRIPT_ID,
+            title: SCRIPT_TITLE,
+            enabled: state.enabled,
+            render: renderPanel,
+            onToggle: (next) => setEnabled(next)
+          });
+          // Clean up resources after successful registration
+          clearPollTimeout();
+          removeEventListener();
+        }
+      }
+    };
 
-    // Listen for shared UI ready event with proper detail consumption
-    document.addEventListener('userscriptSharedUiReady', (event) => {
-      setTimeout(() => {
-        // Try to get factory from event detail first
-        const providedFactory = event?.detail?.sharedUi;
-        
-        if (!sharedUiReady) {
-          initSharedUi(providedFactory);
-        }
-        
-        // Register/re-register if ready and not already done
-        if (sharedUi && typeof state !== 'undefined' && 
-            typeof renderPanel === 'function' && typeof setEnabled === 'function') {
-          if (!registrationAttempted) {
-            registrationAttempted = true;
-            sharedUi.registerScript({
-              id: SCRIPT_ID,
-              title: SCRIPT_TITLE,
-              enabled: state.enabled,
-              render: renderPanel,
-              onToggle: (next) => setEnabled(next)
-            });
-          }
-        }
-      }, 0);
-    }, { once: true });
+    // Try immediate detection (for scripts that load after userscriptui.user.js)
+    if (initSharedUi()) {
+      tryRegisterScript();
+    }
+
+    let eventListenerRef = null;
+    const removeEventListener = () => {
+      if (eventListenerRef) {
+        document.removeEventListener('userscriptSharedUiReady', eventListenerRef);
+        eventListenerRef = null;
+      }
+    };
+
+    // Listen for shared UI ready event - REMOVED { once: true } to handle multiple events
+    // and race conditions with load order
+    eventListenerRef = (event) => {
+      // Try to get factory from event detail first
+      const providedFactory = event?.detail?.sharedUi;
+      
+      if (!sharedUiReady) {
+        initSharedUi(providedFactory);
+      }
+      
+      // Always try registration when event fires (idempotent)
+      tryRegisterScript();
+    };
+    document.addEventListener('userscriptSharedUiReady', eventListenerRef);
+    
+    // Polling fallback for race conditions where event already fired
+    // or userscriptui.user.js loads after this script
+    let pollAttempts = 0;
+    const maxPollAttempts = 20; // Poll for up to 2 seconds
+    const pollInterval = 100;
+    let pollTimeoutId = null;
+
+    const clearPollTimeout = () => {
+      if (pollTimeoutId !== null) {
+        clearTimeout(pollTimeoutId);
+        pollTimeoutId = null;
+      }
+    };
+
+    const pollForSharedUi = () => {
+      if (sharedUiReady || pollAttempts >= maxPollAttempts) {
+        clearPollTimeout();
+        return;
+      }
+      pollAttempts++;
+      if (initSharedUi()) {
+        tryRegisterScript();
+      } else {
+        pollTimeoutId = setTimeout(pollForSharedUi, pollInterval);
+      }
+    };
+    pollTimeoutId = setTimeout(pollForSharedUi, pollInterval);
   }
   const state = {
     enabled: true,
@@ -926,10 +972,36 @@
       }
     };
 
+    // XBrowser compatibility: prefer data URL for better mobile download manager support
+    // Blob URLs may fail silently on some Android browsers
+    let downloadUrl = resource.getUrl();
+    try {
+      const blob = resource.getBlob();
+      // Only convert to data URL if size is reasonable (< 2MB for mobile compatibility)
+      if (blob.size < MAX_DATA_URL_FILE_SIZE_BYTES) {
+        const reader = new FileReader();
+        const dataUrlPromise = new Promise((resolve, reject) => {
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error('Failed to read blob'));
+          reader.readAsDataURL(blob);
+        });
+        try {
+          downloadUrl = await dataUrlPromise;
+        } catch (err) {
+          log('warn', 'Failed to convert blob to data URL, falling back to blob URL', { error: err?.message || String(err) });
+          // Fall back to blob URL if data URL conversion fails
+          downloadUrl = resource.getUrl();
+        }
+      }
+    } catch (err) {
+      log('warn', 'Error while preparing download URL, using original blob URL', { error: err?.message || String(err) });
+      // Use blob URL if any error occurs
+    }
+
     const downloadDetails = {
-      url: resource.getUrl(),
+      url: downloadUrl,
       name: filename,
-      saveAs: true,
+      saveAs: false, // XBrowser may handle saveAs=false better on mobile
       onload: () => {
         resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
         if (resolveLegacy) {
