@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.30.0146
-// @description  Accelerates download countdown timers and enables download controls.
+// @version      2026.01.02.0249
+// @description  Accelerates download countdown timers with comprehensive file-host verification support (FreeDlink, Rapidgator, Uploaded, etc).
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cG9seWxpbmUgcG9pbnRzPSIxMiA2IDEyIDEyIDE2IDE0Ii8+PC9zdmc+
 // @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:up|down|load|dl|mirror|drain|transfer)[a-z0-9-]*|[a-z0-9-]*(?:up|down|load|dl|mirror|drain|transfer))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
@@ -16,7 +16,10 @@
 // @grant        GM_unregisterMenuCommand
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
+// @connect      fredl.ru
+// @connect      freedl.ink
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
@@ -29,14 +32,22 @@
   - Accelerates common download countdown timers.
   - Enables disabled download controls when timers finish.
   - Provides a menu toggle and keyboard shortcut (acceleration starts only when enabled).
+  - FreeDlink/Freedl.ink support: Auto-calls createAds API to populate verification fields.
+  - Generic file-host support: Handles common verification patterns (hidden fields, tokens, etc).
+  - Works with antiadblock.user.js which handles adblock_detected field spoofing.
+  - XBrowser compatible with localStorage fallback when GM APIs unavailable.
 
   How it works:
   - Hooks timers, detects countdown-like delays, and shortens them when enabled.
   - Scans the DOM for timer elements and updates them faster.
+  - On FreeDlink: Automatically calls createAds API and populates adsOnlinehash/level fields.
+  - Generic sites: Auto-populates common verification fields like wait_token, download_token, etc.
+  - Ad-block detection spoofing is handled by the antiadblock script.
 
   Configuration:
   - Adjust ACCELERATION_FACTOR and related constants inside main().
   - Default state is disabled; use the userscript menu or shortcut to enable.
+  - Site-specific verification is automatic (user still solves captchas manually).
 */
 
 (function() {
@@ -60,10 +71,26 @@
 
     const gmStore = {
         async get(key, fallback) {
-            try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
+            try { 
+                if (typeof GM_getValue === 'function') {
+                    return await GM_getValue(key, fallback);
+                }
+                // Fallback to localStorage for XBrowser compatibility
+                const stored = localStorage.getItem(key);
+                return stored !== null ? JSON.parse(stored) : fallback;
+            } catch (_) { 
+                return fallback; 
+            }
         },
         async set(key, value) {
-            try { await GM_setValue(key, value); } catch (_) {}
+            try { 
+                if (typeof GM_setValue === 'function') {
+                    await GM_setValue(key, value);
+                } else {
+                    // Fallback to localStorage for XBrowser compatibility
+                    localStorage.setItem(key, JSON.stringify(value));
+                }
+            } catch (_) {}
         }
     };
     // Robust shared UI detection across sandbox boundaries
@@ -248,6 +275,238 @@
     //////////////////////////////////////////////////////////////
 
     async function main() {
+
+    // FreeDlink/Freedl.ink specific support
+    const isFreeDlink = location.hostname.endsWith('fredl.ru') || location.hostname.endsWith('freedl.ink');
+    
+    // FreeDlink ad-verification helper
+    const handleFreeDlinkVerification = async () => {
+        if (!isFreeDlink) return;
+        
+        const doc = (typeof unsafeWindow !== 'undefined' && unsafeWindow.document) || document;
+        const win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+        
+        // Extract file code from URL (e.g., /6blvteuy9wqq)
+        const fileCodeMatch = location.pathname.match(/\/([a-z0-9]{10,})/i);
+        if (!fileCodeMatch) {
+            log('info', 'FreeDlink: No file code found in URL');
+            return;
+        }
+        
+        const fileCode = fileCodeMatch[1];
+        log('info', `FreeDlink: Processing file ${fileCode}`);
+        
+        // Wait for DOM to be ready
+        const waitForElement = (selector, timeout = 5000) => {
+            return new Promise((resolve) => {
+                if (doc.querySelector(selector)) {
+                    return resolve(doc.querySelector(selector));
+                }
+                
+                const observer = new MutationObserver(() => {
+                    if (doc.querySelector(selector)) {
+                        observer.disconnect();
+                        resolve(doc.querySelector(selector));
+                    }
+                });
+                
+                observer.observe(doc.body || doc.documentElement, {
+                    childList: true,
+                    subtree: true
+                });
+                
+                setTimeout(() => {
+                    observer.disconnect();
+                    resolve(null);
+                }, timeout);
+            });
+        };
+        
+        // Auto-populate ad verification fields
+        if (typeof GM_xmlhttpRequest === 'function') {
+            try {
+                const createAdsUrl = `https://fredl.ru/createAds/${fileCode}/${Math.random()}`;
+                log('info', `FreeDlink: Calling createAds API: ${createAdsUrl}`);
+                
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: createAdsUrl,
+                    onload: function(response) {
+                        try {
+                            const data = JSON.parse(response.responseText);
+                            log('info', 'FreeDlink: createAds response received', data);
+                            
+                            if (data && data.status && data.message) {
+                                // Wait for fields to exist before populating
+                                setTimeout(() => {
+                                    const hashField = doc.getElementById('adsOnlinehash');
+                                    const levelField = doc.getElementById('level');
+                                    
+                                    if (hashField && data.message.hash) {
+                                        hashField.value = data.message.hash;
+                                        log('info', `FreeDlink: Set adsOnlinehash = ${data.message.hash}`);
+                                    }
+                                    
+                                    if (levelField && data.message.level) {
+                                        levelField.value = data.message.level;
+                                        log('info', `FreeDlink: Set level = ${data.message.level}`);
+                                    }
+                                    
+                                    // Optionally open ad link in background (commented out by default)
+                                    // if (data.message.view_ad_link) {
+                                    //     window.open(data.message.view_ad_link, '_blank');
+                                    //     log('info', 'FreeDlink: Opened ad link');
+                                    // }
+                                }, 500);
+                            }
+                        } catch (e) {
+                            log('error', 'FreeDlink: Error parsing createAds response', e);
+                        }
+                    },
+                    onerror: function(error) {
+                        log('error', 'FreeDlink: createAds request failed', error);
+                    }
+                });
+            } catch (e) {
+                log('error', 'FreeDlink: Error calling createAds', e);
+            }
+        } else {
+            log('warn', 'FreeDlink: GM_xmlhttpRequest not available, cannot auto-populate ad verification');
+        }
+    };
+    
+    // Call FreeDlink handler if on FreeDlink site
+    if (isFreeDlink) {
+        log('info', 'FreeDlink: Detected FreeDlink site, enabling ad-verification support');
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                handleFreeDlinkVerification();
+            }, { once: true });
+        } else {
+            handleFreeDlinkVerification();
+        }
+    }
+
+    // Generic file-host verification field handler
+    // Handles common verification patterns across multiple file hosting sites
+    const handleGenericVerificationFields = () => {
+        const doc = (typeof unsafeWindow !== 'undefined' && unsafeWindow.document) || document;
+        
+        // Common verification field patterns found in file hosting sites
+        const verificationFields = [
+            { id: 'wait_token', fallback: () => generateToken() },
+            { id: 'download_token', fallback: () => generateToken() },
+            { id: 'csrf_token', fallback: () => extractFromMeta('csrf-token') },
+            { id: '_token', fallback: () => extractFromMeta('csrf-token') },
+            { id: 'authenticity_token', fallback: () => generateToken() },
+            { id: 'download_verify', fallback: () => '1' },
+            { id: 'time', fallback: () => Date.now().toString() },
+            { id: 'timestamp', fallback: () => Math.floor(Date.now() / 1000).toString() },
+            { name: 'op', fallback: () => 'download2' },
+            { name: 'method_free', fallback: () => 'Free Download' },
+            { name: 'method_premium', fallback: () => '' },
+            { id: 'free', fallback: () => '1' },
+            { id: 'download_free', fallback: () => '1' }
+        ];
+        
+        // Helper to generate a simple token
+        const generateToken = () => {
+            return Array.from({length: 32}, () => 
+                Math.floor(Math.random() * 16).toString(16)
+            ).join('');
+        };
+        
+        // Helper to extract token from meta tags
+        const extractFromMeta = (name) => {
+            const meta = doc.querySelector(`meta[name="${name}"]`);
+            return meta ? meta.getAttribute('content') : generateToken();
+        };
+        
+        // Populate missing verification fields
+        verificationFields.forEach(field => {
+            try {
+                let element = null;
+                
+                if (field.id) {
+                    element = doc.getElementById(field.id);
+                } else if (field.name) {
+                    element = doc.querySelector(`input[name="${field.name}"]`);
+                }
+                
+                if (element && element.tagName === 'INPUT' && !element.value) {
+                    element.value = field.fallback();
+                    log('info', `Auto-populated field: ${field.id || field.name} = ${element.value}`);
+                }
+            } catch (e) {
+                // Ignore errors for individual fields
+            }
+        });
+        
+        // Look for dynamically required fields in data attributes or scripts
+        const scripts = doc.querySelectorAll('script:not([src])');
+        scripts.forEach(script => {
+            try {
+                const content = script.textContent;
+                
+                // Look for common patterns like: var download_token = "..."
+                const tokenMatch = content.match(/(?:var|let|const)\s+(\w*token\w*)\s*=\s*["']([^"']+)["']/i);
+                if (tokenMatch && tokenMatch[1] && tokenMatch[2]) {
+                    const fieldName = tokenMatch[1];
+                    const tokenValue = tokenMatch[2];
+                    
+                    const field = doc.getElementById(fieldName) || doc.querySelector(`input[name="${fieldName}"]`);
+                    if (field && field.tagName === 'INPUT' && !field.value) {
+                        field.value = tokenValue;
+                        log('info', `Auto-populated from script: ${fieldName} = ${tokenValue}`);
+                    }
+                }
+                
+                // Look for session/download verification variables
+                const sessionMatch = content.match(/(?:session|download)_?(?:id|key|verify)\s*[:=]\s*["']([^"']+)["']/i);
+                if (sessionMatch && sessionMatch[1]) {
+                    // Try to find corresponding hidden field
+                    const hiddenFields = doc.querySelectorAll('input[type="hidden"][name*="session"], input[type="hidden"][name*="verify"]');
+                    hiddenFields.forEach(field => {
+                        if (!field.value) {
+                            field.value = sessionMatch[1];
+                            log('info', `Auto-populated session field: ${field.name} = ${sessionMatch[1]}`);
+                        }
+                    });
+                }
+            } catch (e) {
+                // Ignore script parsing errors
+            }
+        });
+    };
+    
+    // Run generic verification field handler
+    const runGenericHandler = () => {
+        handleGenericVerificationFields();
+        
+        // Also watch for dynamically added fields
+        const fieldObserver = new MutationObserver(() => {
+            handleGenericVerificationFields();
+        });
+        
+        if (document.body) {
+            fieldObserver.observe(document.body, { 
+                childList: true, 
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['disabled', 'readonly']
+            });
+            
+            // Disconnect after 30 seconds to avoid performance issues
+            setTimeout(() => fieldObserver.disconnect(), 30000);
+        }
+    };
+    
+    // Run immediately and on DOM ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', runGenericHandler, { once: true });
+    } else {
+        runGenericHandler();
+    }
 
     // Configuration
     const ACCELERATION_FACTOR = 100;  // 100x speed (1000ms becomes 10ms)
@@ -556,46 +815,48 @@
             if (!state.enabled) return;
             
             try {
-                // Pattern 1: Direct DOM manipulation for common sites
-                const commonPatterns = [
-                    // Disable waiting and enable download buttons
-                    () => {
-                        const waitElements = doc.querySelectorAll('[class*="wait"], [id*="wait"]');
-                        waitElements.forEach(el => {
-                            if (el.style) el.style.display = 'none';
-                        });
-                    },
-                    
-                    // Enable disabled download elements
-                    () => {
-                        const disabledElements = doc.querySelectorAll('.disabled, [disabled]');
-                        disabledElements.forEach(el => {
-                            if (el.classList.contains('disabled')) {
+                // Pattern 1: Only hide wait elements with specific timer text patterns
+                // Don't hide ALL elements with "wait" - be selective
+                const waitElements = doc.querySelectorAll('[class*="wait"], [id*="wait"]');
+                waitElements.forEach(el => {
+                    // Only hide if it contains countdown text like "seconds", "wait", etc.
+                    if (el.textContent && /\d+\s*(second|sec|minute|min|wait)/i.test(el.textContent)) {
+                        if (el.style) el.style.display = 'none';
+                    }
+                });
+                
+                // Pattern 2: Enable disabled download elements (but not all disabled elements)
+                // Only target elements that look like download buttons
+                const downloadSelectors = [
+                    'button[disabled][class*="download"]',
+                    'button[disabled][id*="download"]',
+                    'a.disabled[href*="download"]',
+                    'input[type="submit"][disabled][value*="download" i]'
+                ];
+                
+                downloadSelectors.forEach(selector => {
+                    try {
+                        const elements = doc.querySelectorAll(selector);
+                        elements.forEach(el => {
+                            if (el.classList && el.classList.contains('disabled')) {
                                 el.classList.remove('disabled');
                                 el.classList.add('enabled');
                             }
                             if (el.disabled) el.disabled = false;
                         });
-                    },
-                    
-                    // Show hidden download links
-                    () => {
-                        const hiddenDownloads = doc.querySelectorAll('[style*="display: none"], [style*="visibility: hidden"]');
-                        hiddenDownloads.forEach(el => {
-                            if (el.href && el.href.includes('download')) {
-                                el.style.display = '';
-                                el.style.visibility = 'visible';
-                            }
-                        });
+                    } catch (e) {
+                        // Ignore selector errors
                     }
-                ];
+                });
                 
-                // Apply patterns with delay to ensure DOM is ready
-                setTimeout(() => {
-                    commonPatterns.forEach(pattern => {
-                        try { pattern(); } catch (e) { /* ignore */ }
-                    });
-                }, 500);
+                // Pattern 3: Show hidden download links (only actual download links)
+                const hiddenDownloads = doc.querySelectorAll('a[style*="display"][href*="download"], a[style*="visibility"][href*="download"]');
+                hiddenDownloads.forEach(el => {
+                    if (el.href && el.href.includes('download')) {
+                        el.style.display = '';
+                        el.style.visibility = 'visible';
+                    }
+                });
                 
             } catch (e) {
                 // Ignore errors
@@ -957,6 +1218,52 @@
             onToggle: (next) => setEnabled(next)
         });
     }
+    
+    // Fallback UI for XBrowser/environments without GM_registerMenuCommand
+    // Create a simple toggle button when neither shared UI nor menu commands are available
+    const createFallbackUI = () => {
+        if (typeof GM_registerMenuCommand !== 'function' && !sharedUi) {
+            // Wait for body to be available
+            const injectButton = () => {
+                const doc = (typeof unsafeWindow !== 'undefined' && unsafeWindow.document) || document;
+                if (doc.getElementById('dlcnt-toggle')) return; // Already exists
+                
+                const toggle = doc.createElement('button');
+                toggle.id = 'dlcnt-toggle';
+                toggle.textContent = state.enabled ? '⏱️ Timer: ON' : '⏱️ Timer: OFF';
+                toggle.style.cssText = `
+                    position: fixed;
+                    bottom: 10px;
+                    right: 10px;
+                    z-index: 999999;
+                    font-size: 12px;
+                    padding: 8px 12px;
+                    background: ${state.enabled ? '#4CAF50' : '#f44336'};
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    font-weight: 500;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+                `;
+                toggle.addEventListener('click', async () => {
+                    await setEnabled(!state.enabled);
+                    toggle.textContent = state.enabled ? '⏱️ Timer: ON' : '⏱️ Timer: OFF';
+                    toggle.style.background = state.enabled ? '#4CAF50' : '#f44336';
+                });
+                (doc.body || doc.documentElement).appendChild(toggle);
+            };
+            
+            if (document.body) {
+                injectButton();
+            } else {
+                document.addEventListener('DOMContentLoaded', injectButton, { once: true });
+            }
+        }
+    };
+    
+    createFallbackUI();
 
     await setEnabled(state.enabled);
 
