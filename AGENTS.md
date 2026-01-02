@@ -8,6 +8,8 @@ This repository contains **userscripts**. Developer agents (Codex/Copilot/etc.) 
 
 ## 0) What “done” means
 
+**Quick Reference:** See [BEST-PRACTICES-CHECKLIST.md](./docs/BEST-PRACTICES-CHECKLIST.md) for a comprehensive checklist.
+
 A change is complete only when all items below are true:
 
 - Script has a **valid metadata block** and includes at least one `@match` or `@include`.
@@ -484,8 +486,32 @@ Add new validation logic to `/dev/scripts/lint.js` or `/dev/scripts/test.js`.
 
 ## 18) References (for agents)
 
-- **[API-doc.md](./API-doc.md)** (required reading; authoritative API guidance for all scripts)
-- **[AGENTS-boilerplate.md](./AGENTS-boilerplate.md)** (scaffold, formatting, and shared UI/logging integration rules)
+### Core Documentation (Required Reading)
+
+- **[API-doc.md](./API-doc.md)** — Authoritative API guidance for all scripts (XBrowser compatibility reference)
+- **[AGENTS-boilerplate.md](./AGENTS-boilerplate.md)** — Scaffold, formatting, and shared UI/logging integration rules
+- **[BEST-PRACTICES-CHECKLIST.md](./docs/BEST-PRACTICES-CHECKLIST.md)** — Quick reference checklist for ensuring scripts meet industry standards
+- **[RESEARCH-FINDINGS.md](./docs/RESEARCH-FINDINGS.md)** — Comprehensive analysis comparing this repository against industry best practices
+
+### Concurrency & Load Order (Critical)
+
+- **[CONCURRENCY.md](./docs/CONCURRENCY.md)** — Detailed analysis of race conditions, API conflicts, and mitigation strategies when 12+ scripts run simultaneously
+- **[ANDROID-XBROWSER-FIXES-TECHNICAL.md](./docs/ANDROID-XBROWSER-FIXES-TECHNICAL.md)** — Technical details on polling fallback pattern, download fixes, and load order independence
+
+### Testing & Validation
+
+- **[ANDROID-XBROWSER-TESTING.md](./docs/ANDROID-XBROWSER-TESTING.md)** — Android XBrowser testing procedures and compatibility verification
+- **[README.md](./README.md)** — User-facing documentation with load order priorities and concurrency safeguards
+
+### Script-Specific Documentation
+
+- **[docs/README-dlcountdown-fix.md](./docs/README-dlcountdown-fix.md)** — Download countdown timer fixes and implementation details
+- **[docs/dlcountdown-changes.md](./docs/dlcountdown-changes.md)** — Change log for dlcountdown.user.js
+- **[docs/dlcountdown-flow.md](./docs/dlcountdown-flow.md)** — Flow diagram for download countdown bypass logic
+- **[docs/dlcountdown-testing.md](./docs/dlcountdown-testing.md)** — Testing procedures for download countdown script
+
+### External References
+
 - Tampermonkey documentation (metadata, grants, APIs, sandbox, updates)
 - Tampermonkey changelog (behaviour changes, MV3 notes)
 - Chrome match patterns documentation (for `@match` semantics)
@@ -526,6 +552,8 @@ jsdelivr serves CommonJS builds (`turndown.browser.cjs.min.js`) that expect `mod
 ---
 
 ## 20) Performance & Concurrency Best Practices
+
+**See also:** [CONCURRENCY.md](./docs/CONCURRENCY.md) for detailed analysis of race conditions, API conflicts, and mitigation strategies.
 
 ### Idempotency
 - Every script must be safe to run twice (SPA navigation, hot reloads)
