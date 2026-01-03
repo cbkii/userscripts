@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.02.0134
+// @version      2026.01.03.0121
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PHBhdGggZD0iTTEwIDEzaDQiLz48cGF0aCBkPSJNMTAgMTdoNCIvPjxwYXRoIGQ9Ik0xMCA5aDIiLz48L3N2Zz4=
@@ -839,6 +839,43 @@
 
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  const handleCopyToClipboard = async (options = {}) => {
+    if (!state.enabled) {
+      logInfo('Copy skipped because script is disabled');
+      return;
+    }
+    try {
+      await wait(POST_IDLE_DELAY_MS);
+      const { node, title } = extractMainContent({ aggressiveClutter: options.aggressiveClutter });
+      const markdown = buildMarkdownDocument(node, title);
+      try {
+        if (typeof GM_setClipboard === 'function') {
+          GM_setClipboard(markdown, { type: 'text', mimetype: 'text/plain' });
+          notify(`✓ Copied to clipboard (${markdown.length} chars)`);
+          logInfo('Markdown copied to clipboard', { length: markdown.length });
+        } else {
+          // Fallback for browsers/managers without GM_setClipboard
+          const textarea = document.createElement('textarea');
+          textarea.value = markdown;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          textarea.remove();
+          notify(`✓ Copied to clipboard (${markdown.length} chars)`);
+          logInfo('Markdown copied to clipboard (fallback)', { length: markdown.length });
+        }
+      } catch (clipErr) {
+        logError('Clipboard copy failed', { error: clipErr?.message || String(clipErr) });
+        notify('Clipboard copy failed. See console for details.');
+      }
+    } catch (err) {
+      logError('Copy preparation failed', { error: err?.message || String(err) });
+      notify('Clipboard copy failed. See console for details.');
+    }
+  };
+
   const handleConvert = async (options = {}) => {
     if (!state.enabled) {
       logInfo('Conversion skipped because script is disabled');
@@ -913,7 +950,7 @@
     buttonsRow.style.gap = '8px';
     buttonsRow.style.flexWrap = 'wrap';
 
-    const makeButton = (label, opts) => {
+    const makeButton = (label, opts, handler) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = label;
@@ -924,12 +961,13 @@
       btn.style.color = '#f8fafc';
       btn.style.cursor = 'pointer';
       btn.style.fontSize = '13px';
-      btn.addEventListener('click', () => handleConvert(opts));
+      btn.addEventListener('click', () => (handler || handleConvert)(opts));
       return btn;
     };
 
-    buttonsRow.appendChild(makeButton('Convert (clean)', { aggressiveClutter: true }));
-    buttonsRow.appendChild(makeButton('Convert (raw)', { aggressiveClutter: false }));
+    buttonsRow.appendChild(makeButton('Convert & Download (clean)', { aggressiveClutter: true }));
+    buttonsRow.appendChild(makeButton('Convert & Download (raw)', { aggressiveClutter: false }));
+    buttonsRow.appendChild(makeButton('📋 Copy to Clipboard', { aggressiveClutter: true }, handleCopyToClipboard));
     wrapper.appendChild(buttonsRow);
 
     return wrapper;

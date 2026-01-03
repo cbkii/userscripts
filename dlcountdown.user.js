@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Download Timer Accelerator Pro
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.02.0412
+// @version      2026.01.03.0121
 // @description  Accelerates download countdown timers with comprehensive file-host verification support (FreeDlink, Rapidgator, Uploaded, etc).
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cG9seWxpbmUgcG9pbnRzPSIxMiA2IDEyIDEyIDE2IDE0Ii8+PC9zdmc+
@@ -1259,9 +1259,29 @@
             utils.findAndAccelerateTimerElements();
             timerAccelerator.accelerateGlobalTimers();
             timerAccelerator.handleCommonPatterns();
+            showNotification('🔍 Rescanning timers...', 'info');
+            log('info', 'Manual rescan triggered');
         });
         rescanBtn.disabled = !state.enabled;
         buttons.appendChild(rescanBtn);
+
+        const stopBtn = doc.createElement('button');
+        stopBtn.type = 'button';
+        stopBtn.textContent = 'Stop acceleration';
+        stopBtn.style.padding = '8px 12px';
+        stopBtn.style.borderRadius = '6px';
+        stopBtn.style.border = '1px solid rgba(255,255,255,0.18)';
+        stopBtn.style.background = '#991b1b';
+        stopBtn.style.color = '#f8fafc';
+        stopBtn.style.cursor = 'pointer';
+        stopBtn.style.fontSize = '13px';
+        stopBtn.addEventListener('click', async () => {
+            await stop();
+            showNotification('⏱️ Timer acceleration stopped', 'info');
+            log('info', 'Timer acceleration manually stopped');
+        });
+        stopBtn.disabled = !state.enabled || !state.started;
+        buttons.appendChild(stopBtn);
 
         wrapper.appendChild(buttons);
         return wrapper;
