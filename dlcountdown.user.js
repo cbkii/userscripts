@@ -1112,10 +1112,12 @@
     const start = async () => {
         if (state.started) return;
         state.started = true;
+        log('info', 'Timer acceleration starting', { factor: ACCELERATION_FACTOR, url: location.href });
         timerAccelerator.initializeAcceleration();
         state.keyboardHandler = (e) => {
             if (e.ctrlKey && e.altKey && e.key === 'T') {
                 e.preventDefault();
+                log('info', 'Keyboard toggle triggered: Ctrl+Alt+T');
                 setEnabled(!state.enabled);
             }
         };
@@ -1130,6 +1132,7 @@
                     timerAccelerator.accelerateGlobalTimers();
                 }
             }, 2000);
+            log('info', 'Rescan interval started (every 2s)');
         };
         
         // Pause interval when tab is hidden to save resources
@@ -1138,8 +1141,10 @@
                 if (state.rescanInterval) {
                     clearInterval(state.rescanInterval);
                     state.rescanInterval = null;
+                    log('info', 'Tab hidden: rescan paused');
                 }
             } else if (state.enabled && state.started) {
+                log('info', 'Tab visible: rescan resumed');
                 startRescanInterval();
             }
         };
@@ -1151,6 +1156,7 @@
             setTimeout(() => {
                 if (state.enabled) {
                     showNotification(`🚀 Download timers running at ${ACCELERATION_FACTOR}x speed`, 'success');
+                    log('info', 'Notification shown: acceleration active');
                 }
             }, 1000);
         }

@@ -1229,10 +1229,25 @@
   };
 
   function applyScriptlets(list) {
+    let appliedCount = 0;
+    let failedCount = 0;
     for (const s of list) {
       const fn = SCRIPTLETS[s.name];
-      if (!fn) continue;
-      try { fn(s.args || []); } catch (e) { dbg('scriptlet failed', s, e); }
+      if (!fn) {
+        log('warn', `Unknown scriptlet: ${s.name}`);
+        continue;
+      }
+      try {
+        fn(s.args || []);
+        appliedCount++;
+        log('info', `Scriptlet applied: ${s.name}`, { args: s.args });
+      } catch (e) {
+        failedCount++;
+        log('error', `Scriptlet failed: ${s.name}`, { error: e?.message || String(e), args: s.args });
+      }
+    }
+    if (appliedCount > 0 || failedCount > 0) {
+      log('info', `Scriptlets: ${appliedCount} applied, ${failedCount} failed`);
     }
   }
 
@@ -1311,16 +1326,35 @@
   ------------------------------------------------------------------ */
   function removeSelectors(selectors) {
     if (!selectors || !selectors.length) return;
+    let removedCount = 0;
     for (const sel of selectors) {
-      try { document.querySelectorAll(sel).forEach(el => el.remove()); } catch (_) {}
+      try {
+        const elements = document.querySelectorAll(sel);
+        elements.forEach(el => {
+          el.remove();
+          removedCount++;
+        });
+      } catch (e) {
+        log('warn', `Failed to remove selector: ${sel}`, { error: e?.message || String(e) });
+      }
+    }
+    if (removedCount > 0) {
+      log('info', `Overlay removal: ${removedCount} element(s) removed`);
     }
   }
 
   function unfreezeScroll() {
     try {
+      const wasLocked = document.documentElement.style.overflow !== 'auto' || 
+                        (document.body && document.body.style.overflow !== 'auto');
       document.documentElement.style.overflow = 'auto';
       if (document.body) document.body.style.overflow = 'auto';
-    } catch (_) {}
+      if (wasLocked) {
+        log('info', 'Scroll unfrozen');
+      }
+    } catch (e) {
+      log('warn', 'Failed to unfreeze scroll', { error: e?.message || String(e) });
+    }
   }
 
   /* ------------------------------------------------------------------
