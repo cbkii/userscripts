@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.02.0412
+// @version      2026.01.03.0121
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDIyczgtNCA4LTEwVjVsLTgtMy04IDN2N2MwIDYgOCAxMCA4IDEweiIvPjwvc3ZnPg==
@@ -1599,6 +1599,97 @@
 
   if (!enabled) return;
 
+  // Google Ads Infrastructure Mocking (early injection for detection bypass)
+  // Mock common Google Ads objects and methods to neutralize ad-block detection
+  const mockGoogleAdsInfrastructure = () => {
+    try {
+      const win = window;
+      
+      // Mock GPT (Google Publisher Tags)
+      if (!win.googletag) {
+        win.googletag = win.googletag || {};
+        win.googletag.cmd = win.googletag.cmd || [];
+        win.googletag.cmd.push = function() { 
+          dbg('GoogleAds: Intercepted googletag.cmd.push');
+          return Array.prototype.push.apply(this, arguments);
+        };
+        win.googletag.apiReady = true;
+        win.googletag.defineSlot = function() { 
+          dbg('GoogleAds: Mock googletag.defineSlot called');
+          return {
+            addService: function() { return this; },
+            setTargeting: function() { return this; },
+            setCollapseEmptyDiv: function() { return this; },
+            defineSizeMapping: function() { return this; }
+          };
+        };
+        win.googletag.pubads = function() {
+          return {
+            enableSingleRequest: function() {},
+            collapseEmptyDivs: function() {},
+            disableInitialLoad: function() {},
+            refresh: function() {},
+            clear: function() {},
+            setTargeting: function() {},
+            addEventListener: function() {},
+            set: function() {}
+          };
+        };
+        win.googletag.enableServices = function() { dbg('GoogleAds: Mock googletag.enableServices'); };
+        win.googletag.display = function() { dbg('GoogleAds: Mock googletag.display'); };
+        log('info', 'Google Ads: Mocked googletag (GPT)');
+      }
+      
+      // Mock adsbygoogle
+      if (!win.adsbygoogle) {
+        win.adsbygoogle = [];
+        const originalPush = win.adsbygoogle.push;
+        win.adsbygoogle.push = function() {
+          dbg('GoogleAds: Intercepted adsbygoogle.push');
+          log('info', 'Google Ads: adsbygoogle.push intercepted');
+          return originalPush ? originalPush.apply(this, arguments) : 0;
+        };
+      }
+      
+      // Mock Google Ad Loader
+      if (!win.google_ad_client) {
+        win.google_ad_client = 'ca-pub-0000000000000000';
+        win.google_adtest = 'on';
+        log('info', 'Google Ads: Mocked google_ad_client');
+      }
+      
+      // Mock common Google Syndication functions
+      win.google_ad_height = win.google_ad_height || 0;
+      win.google_ad_width = win.google_ad_width || 0;
+      
+      // Mock googlesyndication script loading status
+      Object.defineProperty(win, '__google_ads_loaded__', {
+        get() { return true; },
+        configurable: true
+      });
+      
+      // Mock AdSense fields
+      win.adsbygoogle_apstagSlots = win.adsbygoogle_apstagSlots || [];
+      
+      // Spoof common anti-adblock detection variables
+      win.canRunAds = true;
+      win.adsBlocked = false;
+      win.hasAdblock = false;
+      win.adBlockEnabled = false;
+      win.blockAdBlock = undefined;
+      win.FuckAdBlock = undefined;
+      win.fuckAdBlock = undefined;
+      win.BlockAdBlock = undefined;
+      
+      log('info', 'Google Ads: Infrastructure mocking complete');
+    } catch (e) {
+      log('error', 'Google Ads mocking failed', { error: e?.message || String(e) });
+    }
+  };
+  
+  // Inject Google Ads mocking immediately (document-start)
+  mockGoogleAdsInfrastructure();
+
   (async () => {
     try {
       const rules = await computeAndCacheHostRules(false);
@@ -1657,7 +1748,7 @@
       // Handles common patterns across file hosting sites
       const spoofGenericAdblockFields = () => {
         try {
-          // Common adblock detection field names
+          // Comprehensive list of adblock detection field patterns
           const adblockFieldPatterns = [
             'adblock_detected',
             'adblock_active', 
@@ -1665,19 +1756,35 @@
             'ab_detected',
             'ad_block',
             'hasAdblock',
-            'adBlockEnabled'
+            'adBlockEnabled',
+            'adBlockerDetected',
+            'ads_blocked',
+            'adsbygoogle_loaded',
+            'google_ads_loaded',
+            'adsense_loaded',
+            'ad_blocker_active',
+            'canRunAds',
+            'adsBlocked',
+            'isAdBlockActive'
           ];
+          
+          let spoofedCount = 0;
           
           adblockFieldPatterns.forEach(fieldId => {
             const field = document.getElementById(fieldId);
             if (field && field.tagName === 'INPUT') {
               // Set to 0 or false depending on field type
               if (field.type === 'checkbox') {
-                field.checked = false;
+                if (field.checked === true) {
+                  field.checked = false;
+                  spoofedCount++;
+                  log('info', `Field spoofing: Set checkbox ${fieldId} = false`);
+                }
               } else {
                 if (field.value !== '0' && field.value !== 'false') {
                   field.value = '0';
-                  dbg(`Generic: Set ${fieldId} = 0`);
+                  spoofedCount++;
+                  log('info', `Field spoofing: Set ${fieldId} = 0`);
                 }
               }
             }
@@ -1686,27 +1793,50 @@
             const namedFields = document.querySelectorAll(`input[name="${fieldId}"]`);
             namedFields.forEach(namedField => {
               if (namedField.type === 'checkbox') {
-                namedField.checked = false;
+                if (namedField.checked === true) {
+                  namedField.checked = false;
+                  spoofedCount++;
+                  log('info', `Field spoofing: Set checkbox ${fieldId} (by name) = false`);
+                }
               } else {
                 if (namedField.value !== '0' && namedField.value !== 'false') {
                   namedField.value = '0';
-                  dbg(`Generic: Set ${fieldId} (by name) = 0`);
+                  spoofedCount++;
+                  log('info', `Field spoofing: Set ${fieldId} (by name) = 0`);
                 }
               }
             });
           });
           
-          // Also spoof common JavaScript adblock detection variables
+          // Also spoof common JavaScript adblock detection variables in window
           try {
             if (typeof window !== 'undefined') {
-              // Set common adblock flags to false
-              if ('adblock_detected' in window) window.adblock_detected = false;
-              if ('hasAdBlock' in window) window.hasAdBlock = false;
-              if ('canRunAds' in window) window.canRunAds = true;
-              if ('adsBlocked' in window) window.adsBlocked = false;
+              const globalVars = {
+                'adblock_detected': false,
+                'hasAdBlock': false,
+                'canRunAds': true,
+                'adsBlocked': false,
+                'adBlockEnabled': false,
+                'adBlockerDetected': false,
+                'isAdBlockActive': false
+              };
+              
+              Object.keys(globalVars).forEach(key => {
+                if (key in window && window[key] !== globalVars[key]) {
+                  window[key] = globalVars[key];
+                  spoofedCount++;
+                  log('info', `Global spoofing: Set window.${key} = ${globalVars[key]}`);
+                }
+              });
             }
           } catch (_) {}
-        } catch (_) {}
+          
+          if (spoofedCount > 0) {
+            log('info', `Field spoofing: Total ${spoofedCount} fields/vars spoofed`);
+          }
+        } catch (e) {
+          log('error', 'Field spoofing error', { error: e?.message || String(e) });
+        }
       };
       
       // FreeDlink-specific: Spoof adblock detection
@@ -1789,6 +1919,10 @@
     wrapper.appendChild(info);
 
     const cfg = getConfig();
+    const site = getSiteSetting(HOST);
+    const currentProfile = site.profile || cfg.globalProfile;
+    
+    // Global enable/disable toggle
     const globalToggle = document.createElement('div');
     globalToggle.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px;';
     
@@ -1814,6 +1948,92 @@
     globalToggle.appendChild(toggleBtn);
     wrapper.appendChild(globalToggle);
 
+    // Profile/Mode Selection
+    const modeSection = document.createElement('div');
+    modeSection.style.cssText = 'display: flex; flex-direction: column; gap: 8px;';
+    
+    const modeLabel = document.createElement('div');
+    modeLabel.textContent = `Current Mode: ${currentProfile.toUpperCase()}`;
+    modeLabel.style.cssText = 'font-size: 13px; color: #cbd5e1; font-weight: 600;';
+    modeSection.appendChild(modeLabel);
+    
+    const modeButtons = document.createElement('div');
+    modeButtons.style.cssText = 'display: flex; gap: 6px; flex-wrap: wrap;';
+    
+    const modes = [
+      { name: 'off', label: 'OFF', desc: 'Disable for this site', color: '#6b7280' },
+      { name: 'safe', label: 'SAFE', desc: 'Conservative (for sensitive sites)', color: '#3b82f6' },
+      { name: 'light', label: 'LIGHT', desc: 'Minimal intervention', color: '#10b981' },
+      { name: 'medium', label: 'MEDIUM', desc: 'Balanced protection', color: '#f59e0b' },
+      { name: 'nuclear', label: 'NUCLEAR', desc: 'Maximum aggressiveness', color: '#ef4444' }
+    ];
+    
+    modes.forEach(mode => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = mode.label;
+      btn.title = mode.desc;
+      const isActive = (mode.name === 'off' && site.enabled === false) || 
+                       (mode.name !== 'off' && currentProfile === mode.name && site.enabled !== false);
+      btn.style.cssText = `
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: ${isActive ? '2px' : '1px'} solid ${isActive ? mode.color : 'rgba(255,255,255,0.18)'};
+        background: ${isActive ? mode.color : '#1f2937'};
+        color: #f8fafc;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 700;
+        flex: 1;
+        min-width: 70px;
+      `;
+      btn.addEventListener('click', () => {
+        if (mode.name === 'off') {
+          setSiteSetting(HOST, { enabled: false });
+          log('info', 'Anti-adblock disabled for site', { host: HOST });
+        } else {
+          setSiteSetting(HOST, { enabled: true, profile: mode.name });
+          log('info', 'Anti-adblock mode changed', { host: HOST, mode: mode.name });
+        }
+        setTimeout(() => location.reload(), 300);
+      });
+      modeButtons.appendChild(btn);
+    });
+    
+    modeSection.appendChild(modeButtons);
+    wrapper.appendChild(modeSection);
+
+    // Feature Toggles (for current profile)
+    if (currentProfile && site.enabled !== false) {
+      const features = PROFILE_FEATURES[currentProfile];
+      if (features) {
+        const featuresSection = document.createElement('div');
+        featuresSection.style.cssText = 'margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);';
+        
+        const featuresTitle = document.createElement('div');
+        featuresTitle.textContent = 'Active Features';
+        featuresTitle.style.cssText = 'font-size: 12px; color: #94a3b8; margin-bottom: 6px;';
+        featuresSection.appendChild(featuresTitle);
+        
+        const featuresList = document.createElement('div');
+        featuresList.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 11px;';
+        
+        Object.entries(features).forEach(([key, value]) => {
+          const item = document.createElement('div');
+          item.textContent = `${value ? '✓' : '✗'} ${key}`;
+          item.style.cssText = `color: ${value ? '#10b981' : '#6b7280'}; padding: 2px 0;`;
+          featuresList.appendChild(item);
+        });
+        
+        featuresSection.appendChild(featuresList);
+        wrapper.appendChild(featuresSection);
+      }
+    }
+
+    // Action buttons
+    const actionsRow = document.createElement('div');
+    actionsRow.style.cssText = 'display: flex; gap: 8px; margin-top: 4px;';
+    
     const runBtn = document.createElement('button');
     runBtn.type = 'button';
     runBtn.textContent = 'Run fixes now';
@@ -1825,9 +2045,30 @@
     runBtn.style.cursor = 'pointer';
     runBtn.style.fontSize = '13px';
     runBtn.addEventListener('click', () => {
-      if (state.enabled) start();
+      if (state.enabled) {
+        start();
+        log('info', 'Anti-adblock fixes manually triggered');
+      }
     });
-    wrapper.appendChild(runBtn);
+    actionsRow.appendChild(runBtn);
+    
+    const configBtn = document.createElement('button');
+    configBtn.type = 'button';
+    configBtn.textContent = '⚙️ Advanced';
+    configBtn.title = 'Open advanced configuration panel';
+    configBtn.style.padding = '8px 12px';
+    configBtn.style.borderRadius = '6px';
+    configBtn.style.border = '1px solid rgba(255,255,255,0.18)';
+    configBtn.style.background = '#1f2937';
+    configBtn.style.color = '#f8fafc';
+    configBtn.style.cursor = 'pointer';
+    configBtn.style.fontSize = '13px';
+    configBtn.addEventListener('click', () => {
+      openPanel();
+    });
+    actionsRow.appendChild(configBtn);
+    
+    wrapper.appendChild(actionsRow);
 
     return wrapper;
   };
