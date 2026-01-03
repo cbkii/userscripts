@@ -1,13 +1,11 @@
 // ==UserScript==
-// @name         Download Timer Accelerator Pro
+// @name         Timer Accelerator
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.02.0412
-// @description  Accelerates download countdown timers with comprehensive file-host verification support (FreeDlink, Rapidgator, Uploaded, etc).
+// @version      2026.01.02.1459
+// @description  Accelerates download countdown timers on file-hosting pages when manually triggered via the shared UI or menu.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cG9seWxpbmUgcG9pbnRzPSIxMiA2IDEyIDEyIDE2IDE0Ii8+PC9zdmc+
-// @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:up|down|load|dl|mirror|drain|transfer)[a-z0-9-]*|[a-z0-9-]*(?:up|down|load|dl|mirror|drain|transfer))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
-// @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:download|upload|share|file|cloud|drop|send|host|locker|mirror)[a-z0-9-]*|[a-z0-9-]*(?:download|upload|share|file|cloud|drop|send|host|locker|mirror))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
-// @include      /^https?:\/\/(?:[^\/]+\.)*(?:(?:rapid|nitro|turbo|mega|fichier|uloz|bytez|kat|k2s)[a-z0-9-]*|[a-z0-9-]*(?:rapid|nitro|turbo|mega|fichier|uloz|bytez|kat|k2s))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
+// @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/dlcountdown.user.js
 // @downloadURL  https://raw.githubusercontent.com/cbkii/userscripts/main/dlcountdown.user.js
 // @homepageURL  https://github.com/cbkii/userscripts
@@ -20,21 +18,21 @@
 // @grant        unsafeWindow
 // @connect      fredl.ru
 // @connect      freedl.ink
-// @run-at       document-start
+// @run-at       document-idle
 // @noframes
 // ==/UserScript==
 
 /*
-  LOAD PRIORITY: 5 (Early Intervention)
-  Bypasses download countdown timers by hooking timer functions at document-start.
+  LOAD PRIORITY: 5 (Manual Trigger, shared UI-first)
+  Bypasses download countdown timers after a manual start via the shared UI or menu.
   
   Feature summary:
-  - Accelerates common download countdown timers.
+  - Accelerates common download countdown timers once enabled.
   - Enables disabled download controls when timers finish.
-  - Provides a menu toggle and keyboard shortcut (acceleration starts only when enabled).
+  - Provides shared UI controls and menu shortcuts (no standalone UI).
   - FreeDlink/Freedl.ink support: Auto-calls createAds API to populate verification fields.
   - Generic file-host support: Handles common verification patterns (hidden fields, tokens, etc).
-  - Works with antiadblock.user.js which handles adblock_detected field spoofing.
+  - Highlights the shared UI button on detected file-host URLs for quick access.
   - XBrowser compatible with localStorage fallback when GM APIs unavailable.
 
   How it works:
@@ -46,7 +44,7 @@
 
   Configuration:
   - Adjust ACCELERATION_FACTOR and related constants inside main().
-  - Default state is disabled; use the userscript menu or shortcut to enable.
+  - Default state is dormant; use the shared UI or menu to enable (Always Run toggle available).
   - Site-specific verification is automatic (user still solves captchas manually).
 */
 
@@ -58,12 +56,23 @@
     //////////////////////////////////////////////////////////////
 
     const DEBUG = false;
-    const LOG_PREFIX = '[dlcnt]';
-    const LOG_STORAGE_KEY = 'userscript.logs.dlcountdown';
+    const LOG_PREFIX = '[tma]';
+    const LOG_STORAGE_KEY = 'userscript.logs.timer-accelerator';
     const LOG_MAX_ENTRIES = 200;
-    const SCRIPT_ID = 'dlcountdown';
-    const SCRIPT_TITLE = 'Download Timer Accelerator';
+    const SCRIPT_ID = 'timer-accelerator';
+    const SCRIPT_TITLE = 'Timer Accelerator';
     const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+    const ALWAYS_RUN_KEY = `${SCRIPT_ID}.alwaysRun`;
+    const ATTENTION_STYLE_ID = 'timer-accelerator-attention-style';
+    const ATTENTION_CLASS = 'userscripts-ui-button--timer-attention';
+    const TARGET_PATTERNS = [
+        /^https?:\/\/(?:[^/]+\.)*(?:(?:up|down|load|dl|mirror|drain|transfer)[a-z0-9-]*|[a-z0-9-]*(?:up|down|load|dl|mirror|drain|transfer))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i,
+        /^https?:\/\/(?:[^/]+\.)*(?:(?:download|upload|share|file|cloud|drop|send|host|locker|mirror)[a-z0-9-]*|[a-z0-9-]*(?:download|upload|share|file|cloud|drop|send|host|locker|mirror))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i,
+        /^https?:\/\/(?:[^/]+\.)*(?:(?:rapid|nitro|turbo|mega|fichier|uloz|bytez|kat|k2s)[a-z0-9-]*|[a-z0-9-]*(?:rapid|nitro|turbo|mega|fichier|uloz|bytez|kat|k2s))\.[a-z0-9-]{2,}(?::\d+)?(?:\/.*)?$/i
+    ];
+    const ACCELERATION_FACTOR = 100;  // 100x speed (1000ms becomes 10ms)
+    const MIN_INTERVAL_MS = 10;       // Minimum interval to prevent browser throttling
+    const MAX_INTERVAL_MS = 1000;     // Maximum interval we'll consider a timer
 
     //////////////////////////////////////////////////////////////
     // UTILITIES & HELPERS
@@ -93,6 +102,8 @@
             } catch (_) {}
         }
     };
+    const win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+    const doc = win.document;
     // Robust shared UI detection across sandbox boundaries
     // Deferred registration pattern for document-start scripts
     let sharedUi = null;
@@ -240,13 +251,107 @@
       pollTimeoutId = setTimeout(pollForSharedUi, pollInterval);
     }
     const state = {
-        enabled: true,
+        enabled: false,
         started: false,
+        alwaysRun: false,
+        isTarget: false,
         menuIds: [],
         observer: null,
+        fieldObserver: null,
         rescanInterval: null,
         keyboardHandler: null,
-        visibilityHandler: null
+        visibilityHandler: null,
+        urlHandler: null,
+        historyPatched: false,
+        originalPushState: null,
+        originalReplaceState: null
+    };
+    const uiRefs = {
+        status: null,
+        toggleBtn: null,
+        rescanBtn: null,
+        alwaysRunBtn: null,
+        targetBadge: null,
+        alwaysRunStatus: null
+    };
+
+    const isTargetUrl = (url) => {
+        if (!url) return false;
+        return TARGET_PATTERNS.some((pattern) => pattern.test(url));
+    };
+
+    const ensureAttentionStyle = () => {
+        if (doc.getElementById(ATTENTION_STYLE_ID)) return;
+        const style = doc.createElement('style');
+        style.id = ATTENTION_STYLE_ID;
+        style.textContent = `
+#userscripts-ui-button.${ATTENTION_CLASS} {
+  animation: timer-accelerator-pulse 1.4s ease-in-out infinite;
+  box-shadow: 0 0 0 0.35rem rgba(255,20,147,0.25);
+}
+@keyframes timer-accelerator-pulse {
+  0% { transform: scale(1); box-shadow: 0 0 0 0.35rem rgba(255,20,147,0.25); }
+  50% { transform: scale(1.04); box-shadow: 0 0 0 0.15rem rgba(255,20,147,0.35); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0.35rem rgba(255,20,147,0.25); }
+}
+        `.trim();
+        (doc.head || doc.documentElement).appendChild(style);
+    };
+
+    const setSharedUiAttention = (active, attempt = 0) => {
+        const button = doc.getElementById('userscripts-ui-button');
+        if (!button) {
+            if (active && attempt < 3) {
+                setTimeout(() => setSharedUiAttention(active, attempt + 1), 300);
+            }
+            return;
+        }
+        ensureAttentionStyle();
+        button.classList.toggle(ATTENTION_CLASS, !!active);
+    };
+
+    const handleUrlChange = () => {
+        const current = (typeof location !== 'undefined' && location.href) ? location.href : '';
+        const nextIsTarget = isTargetUrl(current);
+        const changed = nextIsTarget !== state.isTarget;
+        state.isTarget = nextIsTarget;
+        setSharedUiAttention(state.isTarget);
+        if (changed) {
+            refreshPanelUi();
+        }
+    };
+
+    const observeUrlChanges = () => {
+        if (state.urlHandler) return;
+        const handler = () => handleUrlChange();
+        state.urlHandler = handler;
+        try {
+            win.addEventListener('popstate', handler);
+            win.addEventListener('hashchange', handler);
+        } catch (_) {}
+
+        if (!state.historyPatched && win.history && typeof win.history.pushState === 'function') {
+            state.historyPatched = true;
+            if (!state.originalPushState) {
+                state.originalPushState = win.history.pushState.bind(win.history);
+            }
+            if (!state.originalReplaceState) {
+                state.originalReplaceState = win.history.replaceState.bind(win.history);
+            }
+            try {
+                win.history.pushState = (...args) => {
+                    const result = state.originalPushState(...args);
+                    handler();
+                    return result;
+                };
+                win.history.replaceState = (...args) => {
+                    const result = state.originalReplaceState(...args);
+                    handler();
+                    return result;
+                };
+            } catch (_) {}
+        }
+        handleUrlChange();
     };
     const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
@@ -438,18 +543,6 @@
         }
     };
     
-    // Call FreeDlink handler if on FreeDlink site
-    if (isFreeDlink) {
-        log('info', 'FreeDlink: Detected FreeDlink site, enabling ad-verification support');
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => {
-                handleFreeDlinkVerification();
-            }, { once: true });
-        } else {
-            handleFreeDlinkVerification();
-        }
-    }
-
     // Generic file-host verification field handler
     // Handles common verification patterns across multiple file hosting sites
     const handleGenericVerificationFields = () => {
@@ -544,49 +637,50 @@
     
     // Run generic verification field handler
     const runGenericHandler = () => {
-        handleGenericVerificationFields();
-        
-        // Also watch for dynamically added fields
-        const fieldObserver = new MutationObserver(() => {
+        const execute = () => {
             handleGenericVerificationFields();
-        });
-        
-        if (document.body) {
-            fieldObserver.observe(document.body, { 
-                childList: true, 
-                subtree: true,
-                attributes: true,
-                attributeFilter: ['disabled', 'readonly']
+            
+            if (state.fieldObserver) {
+                try { state.fieldObserver.disconnect(); } catch (_) {}
+                state.fieldObserver = null;
+            }
+            
+            // Also watch for dynamically added fields
+            const fieldObserver = new MutationObserver(() => {
+                handleGenericVerificationFields();
             });
             
-            // Disconnect after 30 seconds to avoid performance issues
-            setTimeout(() => fieldObserver.disconnect(), 30000);
+            if (doc.body) {
+                fieldObserver.observe(doc.body, { 
+                    childList: true, 
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['disabled', 'readonly']
+                });
+                
+                // Disconnect after 30 seconds to avoid performance issues
+                setTimeout(() => {
+                    try { fieldObserver.disconnect(); } catch (_) {}
+                    if (state.fieldObserver === fieldObserver) {
+                        state.fieldObserver = null;
+                    }
+                }, 30000);
+            }
+            state.fieldObserver = fieldObserver;
+        };
+        
+        if (doc.readyState === 'loading') {
+            doc.addEventListener('DOMContentLoaded', execute, { once: true });
+        } else {
+            execute();
         }
     };
-    
-    // Run immediately and on DOM ready
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', runGenericHandler, { once: true });
-    } else {
-        runGenericHandler();
-    }
 
-    // Configuration
-    const ACCELERATION_FACTOR = 100;  // 100x speed (1000ms becomes 10ms)
-    const MIN_INTERVAL_MS = 10;       // Minimum interval to prevent browser throttling
-    const MAX_INTERVAL_MS = 1000;     // Maximum interval we'll consider a timer
-    const STORAGE_KEY = ENABLE_KEY;
-    state.enabled = await gmStore.get(STORAGE_KEY, false);
-    
     // Function tracking for restoration
     const originalFunctions = new Map();
     const activeIntervals = new Map();
     const activeTimeouts = new Map();
     const processedElements = new WeakSet();
-    
-    // Safe window access
-    const win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-    const doc = win.document;
     
     // Utility functions
     const utils = {
@@ -1012,62 +1106,29 @@
     };
     
     // UI and control functions
-    const removeNotifications = () => {
-        try {
-            const existingNotifications = doc.querySelectorAll('.timer-accelerator-notification');
-            existingNotifications.forEach((n) => n.remove());
-        } catch (_) {}
-    };
-
-    function showNotification(message, type = 'info') {
-        try {
-            removeNotifications();
-            const notification = doc.createElement('div');
-            notification.className = 'timer-accelerator-notification';
-            notification.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                background: ${type === 'success' ? '#4CAF50' : type === 'error' ? '#f44336' : '#2196F3'};
-                color: white;
-                padding: 12px 20px;
-                border-radius: 8px;
-                z-index: 999999;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                font-size: 14px;
-                font-weight: 500;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-                animation: slideInRight 0.3s ease-out;
-                max-width: 300px;
-                word-wrap: break-word;
-            `;
-            if (!doc.getElementById('timer-accelerator-styles')) {
-                const styleSheet = doc.createElement('style');
-                styleSheet.id = 'timer-accelerator-styles';
-                styleSheet.textContent = `
-                    @keyframes slideInRight {
-                        from { transform: translateX(100%); opacity: 0; }
-                        to { transform: translateX(0); opacity: 1; }
-                    }
-                    @keyframes slideOutRight {
-                        from { transform: translateX(0); opacity: 1; }
-                        to { transform: translateX(100%); opacity: 0; }
-                    }
-                `;
-                (doc.head || doc.documentElement).appendChild(styleSheet);
-            }
-            notification.textContent = message;
-            (doc.body || doc.documentElement).appendChild(notification);
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.style.animation = 'slideOutRight 0.3s ease-in';
-                    setTimeout(() => {
-                        if (notification.parentNode) notification.remove();
-                    }, 300);
-                }
-            }, 4000);
-        } catch (e) {
-            log('info', 'State update', message);
+    function refreshPanelUi() {
+        if (uiRefs.status) {
+            uiRefs.status.textContent = state.enabled
+                ? `Running at ${ACCELERATION_FACTOR}x speed`
+                : 'Dormant (manual trigger)';
+        }
+        if (uiRefs.toggleBtn) {
+            uiRefs.toggleBtn.textContent = state.enabled ? 'Disable' : 'Enable';
+        }
+        if (uiRefs.rescanBtn) {
+            uiRefs.rescanBtn.disabled = !state.enabled || !state.started;
+        }
+        if (uiRefs.alwaysRunBtn) {
+            uiRefs.alwaysRunBtn.textContent = state.alwaysRun ? 'Always Run: ON' : 'Always Run: OFF';
+        }
+        if (uiRefs.targetBadge) {
+            uiRefs.targetBadge.textContent = state.isTarget ? 'File-host URL detected' : 'Waiting for file-host URL';
+            uiRefs.targetBadge.style.color = state.isTarget ? '#22c55e' : '#cbd5e1';
+        }
+        if (uiRefs.alwaysRunStatus) {
+            uiRefs.alwaysRunStatus.textContent = state.alwaysRun
+                ? 'Auto-start enabled on matching pages'
+                : 'Manual start required (Always Run off)';
         }
     }
 
@@ -1089,6 +1150,10 @@
             try { state.observer.disconnect(); } catch (_) {}
             state.observer = null;
         }
+        if (state.fieldObserver) {
+            try { state.fieldObserver.disconnect(); } catch (_) {}
+            state.fieldObserver = null;
+        }
         if (state.keyboardHandler) {
             doc.removeEventListener('keydown', state.keyboardHandler);
             state.keyboardHandler = null;
@@ -1106,12 +1171,25 @@
         });
         activeTimeouts.clear();
         restoreOriginalFunctions();
-        removeNotifications();
+        refreshPanelUi();
     };
 
     const start = async () => {
         if (state.started) return;
         state.started = true;
+        handleUrlChange();
+        if (state.isTarget) {
+            runGenericHandler();
+            if (isFreeDlink) {
+                if (doc.readyState === 'loading') {
+                    doc.addEventListener('DOMContentLoaded', handleFreeDlinkVerification, { once: true });
+                } else {
+                    handleFreeDlinkVerification();
+                }
+            }
+        } else {
+            log('info', 'No matching file-host detected; waiting for manual triggers.');
+        }
         timerAccelerator.initializeAcceleration();
         state.keyboardHandler = (e) => {
             if (e.ctrlKey && e.altKey && e.key === 'T') {
@@ -1146,21 +1224,27 @@
         doc.addEventListener('visibilitychange', state.visibilityHandler);
         
         startRescanInterval();
-        
-        if (state.enabled) {
-            setTimeout(() => {
-                if (state.enabled) {
-                    showNotification(`🚀 Download timers running at ${ACCELERATION_FACTOR}x speed`, 'success');
-                }
-            }, 1000);
-        }
-        log('info', `Status: ${state.enabled ? 'enabled' : 'disabled'}`);
+        refreshPanelUi();
+        log('info', `Timer Accelerator status: ${state.enabled ? 'enabled' : 'disabled'}`);
         log('info', 'Toggle: Ctrl+Alt+T or userscript menu');
     };
 
     //////////////////////////////////////////////////////////////
     // STATE MANAGEMENT
     //////////////////////////////////////////////////////////////
+
+    async function setAlwaysRun(value) {
+        state.alwaysRun = !!value;
+        await gmStore.set(ALWAYS_RUN_KEY, state.alwaysRun);
+        if (!state.alwaysRun && !state.enabled) {
+            await gmStore.set(ENABLE_KEY, false);
+        }
+        refreshPanelUi();
+        registerMenu();
+        if (state.alwaysRun && !state.enabled) {
+            await setEnabled(true);
+        }
+    }
 
     const registerMenu = () => {
         if (typeof GM_registerMenuCommand !== 'function') return;
@@ -1174,11 +1258,15 @@
             return;
         }
         state.menuIds.push(GM_registerMenuCommand(
-            `[Download Countdown] ${state.enabled ? '✓' : '✗'} Enable`,
+            `[Timer] ${state.enabled ? 'Disable' : 'Enable'} acceleration`,
             async () => { await setEnabled(!state.enabled); }
         ));
+        state.menuIds.push(GM_registerMenuCommand(
+            `[Timer] ${state.alwaysRun ? 'Disable' : 'Enable'} Always Run`,
+            async () => { await setAlwaysRun(!state.alwaysRun); }
+        ));
         if (state.enabled) {
-            state.menuIds.push(GM_registerMenuCommand('[Download Countdown] ⟳ Rescan timers', () => {
+            state.menuIds.push(GM_registerMenuCommand('[Timer] ⟳ Rescan timers', () => {
                 utils.findAndAccelerateTimerElements();
                 timerAccelerator.accelerateGlobalTimers();
                 timerAccelerator.handleCommonPatterns();
@@ -1188,24 +1276,16 @@
 
     const setEnabled = async (value) => {
         state.enabled = !!value;
-        await gmStore.set(STORAGE_KEY, state.enabled);
+        await gmStore.set(ENABLE_KEY, state.enabled);
         if (sharedUi) {
             sharedUi.setScriptEnabled(SCRIPT_ID, state.enabled);
         }
         if (!state.enabled) {
             await stop();
-            showNotification('⏱️ Timer acceleration disabled - normal speed', 'info');
         } else {
             await start();
-            showNotification(`🚀 Download timers accelerated ${ACCELERATION_FACTOR}x!`, 'success');
-            setTimeout(() => {
-                if (state.enabled) {
-                    utils.findAndAccelerateTimerElements();
-                    timerAccelerator.accelerateGlobalTimers();
-                    timerAccelerator.handleCommonPatterns();
-                }
-            }, 120);
         }
+        refreshPanelUi();
         registerMenu();
     };
 
@@ -1214,18 +1294,30 @@
     //////////////////////////////////////////////////////////////
 
     const renderPanel = () => {
+        Object.keys(uiRefs).forEach((key) => { uiRefs[key] = null; });
+
         const wrapper = doc.createElement('div');
         wrapper.style.display = 'flex';
         wrapper.style.flexDirection = 'column';
         wrapper.style.gap = '10px';
 
         const status = doc.createElement('div');
-        status.textContent = state.enabled
-            ? `Running at ${ACCELERATION_FACTOR}x speed`
-            : 'Disabled (normal timers)';
         status.style.fontSize = '13px';
         status.style.color = '#cbd5e1';
+        uiRefs.status = status;
         wrapper.appendChild(status);
+
+        const targetBadge = doc.createElement('div');
+        targetBadge.style.fontSize = '12px';
+        targetBadge.style.color = '#cbd5e1';
+        uiRefs.targetBadge = targetBadge;
+        wrapper.appendChild(targetBadge);
+
+        const alwaysRunStatus = doc.createElement('div');
+        alwaysRunStatus.style.fontSize = '12px';
+        alwaysRunStatus.style.color = '#94a3b8';
+        uiRefs.alwaysRunStatus = alwaysRunStatus;
+        wrapper.appendChild(alwaysRunStatus);
 
         const buttons = doc.createElement('div');
         buttons.style.display = 'flex';
@@ -1234,7 +1326,6 @@
 
         const toggleBtn = doc.createElement('button');
         toggleBtn.type = 'button';
-        toggleBtn.textContent = state.enabled ? 'Disable' : 'Enable';
         toggleBtn.style.padding = '8px 12px';
         toggleBtn.style.borderRadius = '6px';
         toggleBtn.style.border = '1px solid rgba(255,255,255,0.18)';
@@ -1243,6 +1334,7 @@
         toggleBtn.style.cursor = 'pointer';
         toggleBtn.style.fontSize = '13px';
         toggleBtn.addEventListener('click', () => setEnabled(!state.enabled));
+        uiRefs.toggleBtn = toggleBtn;
         buttons.appendChild(toggleBtn);
 
         const rescanBtn = doc.createElement('button');
@@ -1260,16 +1352,36 @@
             timerAccelerator.accelerateGlobalTimers();
             timerAccelerator.handleCommonPatterns();
         });
-        rescanBtn.disabled = !state.enabled;
+        uiRefs.rescanBtn = rescanBtn;
         buttons.appendChild(rescanBtn);
 
+        const alwaysRunBtn = doc.createElement('button');
+        alwaysRunBtn.type = 'button';
+        alwaysRunBtn.style.padding = '8px 12px';
+        alwaysRunBtn.style.borderRadius = '6px';
+        alwaysRunBtn.style.border = '1px solid rgba(255,255,255,0.18)';
+        alwaysRunBtn.style.background = '#1f2937';
+        alwaysRunBtn.style.color = '#f8fafc';
+        alwaysRunBtn.style.cursor = 'pointer';
+        alwaysRunBtn.style.fontSize = '13px';
+        alwaysRunBtn.addEventListener('click', () => setAlwaysRun(!state.alwaysRun));
+        uiRefs.alwaysRunBtn = alwaysRunBtn;
+        buttons.appendChild(alwaysRunBtn);
+
         wrapper.appendChild(buttons);
+        refreshPanelUi();
         return wrapper;
     };
 
     //////////////////////////////////////////////////////////////
     // INITIALIZATION
     //////////////////////////////////////////////////////////////
+
+    observeUrlChanges();
+    const savedAlwaysRun = await gmStore.get(ALWAYS_RUN_KEY, false);
+    const savedEnabled = await gmStore.get(ENABLE_KEY, false);
+    state.alwaysRun = !!savedAlwaysRun;
+    state.enabled = state.alwaysRun ? !!savedEnabled : false;
 
     // Try registration now that state/renderPanel/setEnabled are defined
     if (pendingRegistration && typeof pendingRegistration === 'function') {
@@ -1280,53 +1392,7 @@
         // Direct registration if shared UI is already available
         tryRegisterWithSharedUi();
     }
-    
-    // Fallback UI for XBrowser/environments without GM_registerMenuCommand
-    // Create a simple toggle button when neither shared UI nor menu commands are available
-    const createFallbackUI = () => {
-        if (typeof GM_registerMenuCommand !== 'function' && !sharedUi) {
-            // Wait for body to be available
-            const injectButton = () => {
-                const doc = (typeof unsafeWindow !== 'undefined' && unsafeWindow.document) || document;
-                if (doc.getElementById('dlcnt-toggle')) return; // Already exists
-                
-                const toggle = doc.createElement('button');
-                toggle.id = 'dlcnt-toggle';
-                toggle.textContent = state.enabled ? '⏱️ Timer: ON' : '⏱️ Timer: OFF';
-                toggle.style.cssText = `
-                    position: fixed;
-                    bottom: 10px;
-                    right: 10px;
-                    z-index: 999999;
-                    font-size: 12px;
-                    padding: 8px 12px;
-                    background: ${state.enabled ? '#4CAF50' : '#f44336'};
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                    font-weight: 500;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-                `;
-                toggle.addEventListener('click', async () => {
-                    await setEnabled(!state.enabled);
-                    toggle.textContent = state.enabled ? '⏱️ Timer: ON' : '⏱️ Timer: OFF';
-                    toggle.style.background = state.enabled ? '#4CAF50' : '#f44336';
-                });
-                (doc.body || doc.documentElement).appendChild(toggle);
-            };
-            
-            if (document.body) {
-                injectButton();
-            } else {
-                document.addEventListener('DOMContentLoaded', injectButton, { once: true });
-            }
-        }
-    };
-    
-    createFallbackUI();
-
+    refreshPanelUi();
     await setEnabled(state.enabled);
 
     }
