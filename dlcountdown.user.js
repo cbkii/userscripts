@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Timer Accelerator
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.02.1459
-// @description  Accelerates download countdown timers on file-hosting pages when manually triggered via the shared UI or menu.
+// @version      2026.01.03.0121
+// @description  Accelerates download countdown timers with comprehensive file-host verification support (FreeDlink, Rapidgator, Uploaded, etc).
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cG9seWxpbmUgcG9pbnRzPSIxMiA2IDEyIDEyIDE2IDE0Ii8+PC9zdmc+
 // @match        *://*/*
@@ -1194,6 +1194,7 @@
         state.keyboardHandler = (e) => {
             if (e.ctrlKey && e.altKey && e.key === 'T') {
                 e.preventDefault();
+                log('info', 'Keyboard toggle triggered: Ctrl+Alt+T');
                 setEnabled(!state.enabled);
             }
         };
@@ -1208,6 +1209,7 @@
                     timerAccelerator.accelerateGlobalTimers();
                 }
             }, 2000);
+            log('info', 'Rescan interval started (every 2s)');
         };
         
         // Pause interval when tab is hidden to save resources
@@ -1216,8 +1218,10 @@
                 if (state.rescanInterval) {
                     clearInterval(state.rescanInterval);
                     state.rescanInterval = null;
+                    log('info', 'Tab hidden: rescan paused');
                 }
             } else if (state.enabled && state.started) {
+                log('info', 'Tab visible: rescan resumed');
                 startRescanInterval();
             }
         };
@@ -1351,6 +1355,8 @@
             utils.findAndAccelerateTimerElements();
             timerAccelerator.accelerateGlobalTimers();
             timerAccelerator.handleCommonPatterns();
+            showNotification('🔍 Rescanning timers...', 'info');
+            log('info', 'Manual rescan triggered');
         });
         uiRefs.rescanBtn = rescanBtn;
         buttons.appendChild(rescanBtn);
