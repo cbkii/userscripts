@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Log Viewer
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.30.0146
+// @version      2026.01.03.0121
 // @description  View and clear stored userscript logs from a simple on-page dialog.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGxpbmUgeDE9IjgiIHkxPSI2IiB4Mj0iMjEiIHkyPSI2Ii8+PGxpbmUgeDE9IjgiIHkxPSIxMiIgeDI9IjIxIiB5Mj0iMTIiLz48bGluZSB4MT0iOCIgeTE9IjE4IiB4Mj0iMjEiIHkyPSIxOCIvPjxsaW5lIHgxPSIzIiB5MT0iNiIgeDI9IjMuMDEiIHkyPSI2Ii8+PGxpbmUgeDE9IjMiIHkxPSIxMiIgeDI9IjMuMDEiIHkyPSIxMiIvPjxsaW5lIHgxPSIzIiB5MT0iMTgiIHgyPSIzLjAxIiB5Mj0iMTgiLz48L3N2Zz4=
@@ -368,6 +368,10 @@
         white-space: pre-wrap;
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         font-size: 12px;
+        user-select: text;
+        -webkit-user-select: text;
+        -moz-user-select: text;
+        -ms-user-select: text;
       }
       .userscript-logs-actions {
         display: flex;
@@ -440,6 +444,35 @@
       body.textContent = formatLogs(entries);
     });
 
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = '📋 Copy Logs';
+    copyBtn.addEventListener('click', async () => {
+      try {
+        const logText = body.textContent;
+        if (typeof GM_setClipboard === 'function') {
+          GM_setClipboard(logText, { type: 'text', mimetype: 'text/plain' });
+        } else {
+          // Fallback
+          const textarea = document.createElement('textarea');
+          textarea.value = logText;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          textarea.remove();
+        }
+        const originalText = copyBtn.textContent;
+        copyBtn.textContent = '✓ Copied!';
+        setTimeout(() => { copyBtn.textContent = originalText; }, 2000);
+        log('info', 'Logs copied to clipboard');
+      } catch (err) {
+        log('error', 'Failed to copy logs', err);
+        copyBtn.textContent = '✗ Failed';
+        setTimeout(() => { copyBtn.textContent = '📋 Copy Logs'; }, 2000);
+      }
+    });
+
     const clearBtn = document.createElement('button');
     clearBtn.textContent = 'Clear Logs';
     clearBtn.addEventListener('click', async () => {
@@ -448,6 +481,7 @@
     });
 
     actions.appendChild(refreshBtn);
+    actions.appendChild(copyBtn);
     actions.appendChild(clearBtn);
     wrapper.appendChild(actions);
 
@@ -515,6 +549,10 @@
       white-space: pre-wrap;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       font-size: 12px;
+      user-select: text;
+      -webkit-user-select: text;
+      -moz-user-select: text;
+      -ms-user-select: text;
     `;
     body.textContent = 'Loading logs...';
     dialog.appendChild(body);
@@ -530,6 +568,33 @@
       body.textContent = formatLogs(entries);
     });
 
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = '📋 Copy Logs';
+    copyBtn.addEventListener('click', async () => {
+      try {
+        const logText = body.textContent;
+        if (typeof GM_setClipboard === 'function') {
+          GM_setClipboard(logText, { type: 'text', mimetype: 'text/plain' });
+        } else {
+          const textarea = document.createElement('textarea');
+          textarea.value = logText;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          textarea.remove();
+        }
+        const originalText = copyBtn.textContent;
+        copyBtn.textContent = '✓ Copied!';
+        setTimeout(() => { copyBtn.textContent = originalText; }, 2000);
+      } catch (err) {
+        log('error', 'Failed to copy logs', err);
+        copyBtn.textContent = '✗ Failed';
+        setTimeout(() => { copyBtn.textContent = '📋 Copy Logs'; }, 2000);
+      }
+    });
+
     const clearBtn = document.createElement('button');
     clearBtn.textContent = 'Clear Logs';
     clearBtn.addEventListener('click', async () => {
@@ -542,6 +607,7 @@
     closeBtn.addEventListener('click', removeFallback);
 
     actions.appendChild(refreshBtn);
+    actions.appendChild(copyBtn);
     actions.appendChild(clearBtn);
     actions.appendChild(closeBtn);
     dialog.appendChild(actions);

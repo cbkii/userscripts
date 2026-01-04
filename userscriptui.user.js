@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Shared UI Manager
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.30.0146
+// @version      2026.01.04.1428
 // @description  Provides a shared hotpink dock + dark modal with per-script tabs, toggles, and persistent layout for all userscripts.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHJlY3QgeD0iMyIgeT0iMyIgd2lkdGg9IjciIGhlaWdodD0iNyIvPjxyZWN0IHg9IjE0IiB5PSIzIiB3aWR0aD0iNyIgaGVpZ2h0PSI3Ii8+PHJlY3QgeD0iMTQiIHk9IjE0IiB3aWR0aD0iNyIgaGVpZ2h0PSI3Ii8+PHJlY3QgeD0iMyIgeT0iMTQiIHdpZHRoPSI3IiBoZWlnaHQ9IjciLz48L3N2Zz4=
@@ -166,10 +166,32 @@
       border-radius: 8px;
       padding: 6px 8px;
       box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+      transition: max-height 0.2s ease, opacity 0.2s ease;
+      overflow: hidden;
+    }
+    .userscripts-tab.collapsed {
+      max-height: 32px;
+    }
+    .userscripts-tab.collapsed .state,
+    .userscripts-tab.collapsed .toggle {
+      display: none;
     }
     .userscripts-tab.active {
       border-color: #ff69b4;
       box-shadow: 0 0 0 1px #ff69b4, 0 0 0 3px rgba(255,105,180,0.15);
+    }
+    .userscripts-tab .expand-icon {
+      font-size: 12px;
+      color: #cbd5e1;
+      cursor: pointer;
+      padding: 4px;
+      user-select: none;
+      transition: transform 0.2s ease;
+      min-width: 16px;
+      text-align: center;
+    }
+    .userscripts-tab.collapsed .expand-icon {
+      transform: rotate(-90deg);
     }
     .userscripts-tab .title {
       flex: 1;
@@ -278,7 +300,8 @@
       panel: null,
       position: DEFAULT_POSITION,
       activeId: null,
-      scripts: new Map()
+      scripts: new Map(),
+      collapsed: new Set() // Track collapsed tab IDs
     };
 
     const ensureVisible = () => {
@@ -344,6 +367,12 @@
           row.className = 'userscripts-tab';
           row.dataset.scriptId = entry.id;
 
+          const expandIcon = SAFE_DOC.createElement('span');
+          expandIcon.className = 'expand-icon';
+          expandIcon.title = 'Expand/collapse';
+          expandIcon.setAttribute('role', 'button');
+          expandIcon.setAttribute('aria-label', 'Expand or collapse tab');
+
           const titleBtn = SAFE_DOC.createElement('button');
           titleBtn.type = 'button';
           titleBtn.className = 'title';
@@ -356,12 +385,17 @@
           toggleBtn.type = 'button';
           toggleBtn.className = 'toggle';
 
+          row.appendChild(expandIcon);
           row.appendChild(titleBtn);
           row.appendChild(stateLabel);
           row.appendChild(toggleBtn);
-          entry.row = { el: row, stateLabel, toggleBtn };
+          entry.row = { el: row, expandIcon, stateLabel, toggleBtn };
         }
+        const isCollapsed = state.collapsed.has(entry.id);
+        entry.row.el.classList.toggle('collapsed', isCollapsed);
         entry.row.el.classList.toggle('active', entry.id === state.activeId);
+        entry.row.expandIcon.textContent = isCollapsed ? '▶' : '▼';
+        entry.row.expandIcon.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
         entry.row.stateLabel.textContent = entry.enabled ? 'ON' : 'OFF';
         entry.row.toggleBtn.textContent = entry.enabled ? 'Disable' : 'Enable';
         fragment.appendChild(entry.row.el);
@@ -466,6 +500,19 @@
         if (!target) return;
         const id = target.dataset.scriptId;
         if (!id) return;
+        
+        // Handle expand/collapse icon click
+        if (ev.target.classList.contains('expand-icon')) {
+          if (state.collapsed.has(id)) {
+            state.collapsed.delete(id);
+          } else {
+            state.collapsed.add(id);
+          }
+          renderTabs();
+          return;
+        }
+        
+        // Handle toggle button click
         if (ev.target.classList.contains('toggle')) {
           const entry = state.scripts.get(id);
           if (entry?.onToggle) {
@@ -474,6 +521,7 @@
             setScriptEnabled(id, !entry?.enabled);
           }
         } else {
+          // Handle title click - switch panel
           switchPanel(id);
         }
       });
