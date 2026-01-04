@@ -1421,7 +1421,7 @@
             timerAccelerator.accelerateGlobalTimers();
             timerAccelerator.handleCommonPatterns();
             if (sharedUi && typeof sharedUi.showToast === 'function') {
-                sharedUi.showToast('Rescanning timers...', { type: 'info' });
+                sharedUi.showToast('🔍 Rescanning timers...', { type: 'info' });
             } else {
                 log('info', '🔍 Rescanning timers...');
             }
