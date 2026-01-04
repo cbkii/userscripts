@@ -326,7 +326,7 @@
             refreshPanelUi();
             // Honor alwaysRun on dynamic navigation
             if (state.isTarget && state.alwaysRun && !state.enabled) {
-                setEnabled(true).catch(() => {});
+                setEnabled(true).catch(e => console.error('Timer Accelerator: Failed to auto-enable on navigation:', e));
             }
         }
     };
