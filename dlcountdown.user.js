@@ -23,7 +23,7 @@
 // ==/UserScript==
 
 /*
-  LOAD PRIORITY: 5 (Manual Trigger, shared UI-first)
+  LOAD PRIORITY: Manual Trigger (shared UI-first)
   Bypasses download countdown timers after a manual start via the shared UI or menu.
   
   Feature summary:
@@ -56,7 +56,7 @@
     //////////////////////////////////////////////////////////////
 
     const DEBUG = false;
-    const LOG_PREFIX = '[tma]';
+    const LOG_PREFIX = '[timer-accel]';
     const LOG_STORAGE_KEY = 'userscript.logs.timer-accelerator';
     const LOG_MAX_ENTRIES = 200;
     const SCRIPT_ID = 'timer-accelerator';
@@ -281,7 +281,11 @@
     };
 
     const ensureAttentionStyle = () => {
-        if (doc.getElementById(ATTENTION_STYLE_ID)) return;
+        const existing = doc.getElementById(ATTENTION_STYLE_ID);
+        if (existing && existing.parentNode) return;
+        if (existing && !existing.parentNode) {
+            try { existing.remove(); } catch (_) {}
+        }
         const style = doc.createElement('style');
         style.id = ATTENTION_STYLE_ID;
         style.textContent = `
@@ -303,6 +307,8 @@
         if (!button) {
             if (active && attempt < 3) {
                 setTimeout(() => setSharedUiAttention(active, attempt + 1), 300);
+            } else if (active && attempt >= 3) {
+                log('warn', 'Could not find shared UI button after 3 attempts');
             }
             return;
         }
@@ -318,6 +324,18 @@
         setSharedUiAttention(state.isTarget);
         if (changed) {
             refreshPanelUi();
+            // Honor alwaysRun on dynamic navigation
+            if (state.isTarget && state.alwaysRun && !state.started) {
+                state.started = true;
+                runGenericHandler();
+                if (isFreeDlink) {
+                    if (doc.readyState === 'loading') {
+                        doc.addEventListener('DOMContentLoaded', handleFreeDlinkVerification, { once: true });
+                    } else {
+                        handleFreeDlinkVerification();
+                    }
+                }
+            }
         }
     };
 
@@ -330,26 +348,50 @@
             win.addEventListener('hashchange', handler);
         } catch (_) {}
 
-        if (!state.historyPatched && win.history && typeof win.history.pushState === 'function') {
-            state.historyPatched = true;
-            if (!state.originalPushState) {
-                state.originalPushState = win.history.pushState.bind(win.history);
+        if (win.history && typeof win.history.pushState === 'function') {
+            const currentPushState = win.history.pushState;
+            const alreadyPatched = !!(currentPushState && currentPushState.__tmaPatched);
+            if (!alreadyPatched) {
+                const originalPush = currentPushState.bind(win.history);
+                const originalReplace = (win.history.replaceState && typeof win.history.replaceState === 'function')
+                    ? win.history.replaceState.bind(win.history)
+                    : null;
+
+                if (!state.originalPushState) {
+                    state.originalPushState = originalPush;
+                }
+                if (!state.originalReplaceState && originalReplace) {
+                    state.originalReplaceState = originalReplace;
+                }
+
+                try {
+                    const patchedPushState = (...args) => {
+                        const result = (state.originalPushState || originalPush)(...args);
+                        handler();
+                        return result;
+                    };
+                    Object.defineProperty(patchedPushState, '__tmaPatched', {
+                        value: true,
+                        configurable: true
+                    });
+                    win.history.pushState = patchedPushState;
+
+                    if (originalReplace) {
+                        const patchedReplaceState = (...args) => {
+                            const result = (state.originalReplaceState || originalReplace)(...args);
+                            handler();
+                            return result;
+                        };
+                        Object.defineProperty(patchedReplaceState, '__tmaPatched', {
+                            value: true,
+                            configurable: true
+                        });
+                        win.history.replaceState = patchedReplaceState;
+                    }
+
+                    state.historyPatched = true;
+                } catch (_) {}
             }
-            if (!state.originalReplaceState) {
-                state.originalReplaceState = win.history.replaceState.bind(win.history);
-            }
-            try {
-                win.history.pushState = (...args) => {
-                    const result = state.originalPushState(...args);
-                    handler();
-                    return result;
-                };
-                win.history.replaceState = (...args) => {
-                    const result = state.originalReplaceState(...args);
-                    handler();
-                    return result;
-                };
-            } catch (_) {}
         }
         handleUrlChange();
     };
@@ -1116,7 +1158,7 @@
             uiRefs.toggleBtn.textContent = state.enabled ? 'Disable' : 'Enable';
         }
         if (uiRefs.rescanBtn) {
-            uiRefs.rescanBtn.disabled = !state.enabled || !state.started;
+            uiRefs.rescanBtn.disabled = !state.enabled;
         }
         if (uiRefs.alwaysRunBtn) {
             uiRefs.alwaysRunBtn.textContent = state.alwaysRun ? 'Always Run: ON' : 'Always Run: OFF';
@@ -1127,8 +1169,8 @@
         }
         if (uiRefs.alwaysRunStatus) {
             uiRefs.alwaysRunStatus.textContent = state.alwaysRun
-                ? 'Auto-start enabled on matching pages'
-                : 'Manual start required (Always Run off)';
+                ? 'Always Run enabled on matching pages'
+                : 'Always Run is OFF (manual start required)';
         }
     }
 
@@ -1161,6 +1203,28 @@
         if (state.visibilityHandler) {
             doc.removeEventListener('visibilitychange', state.visibilityHandler);
             state.visibilityHandler = null;
+        }
+        // Clean up URL observation
+        if (state.urlHandler) {
+            try {
+                win.removeEventListener('popstate', state.urlHandler);
+                win.removeEventListener('hashchange', state.urlHandler);
+            } catch (_) {}
+            state.urlHandler = null;
+        }
+        // Restore original history methods
+        if (state.historyPatched) {
+            try {
+                if (state.originalPushState && win.history) {
+                    win.history.pushState = state.originalPushState;
+                }
+                if (state.originalReplaceState && win.history) {
+                    win.history.replaceState = state.originalReplaceState;
+                }
+            } catch (_) {}
+            state.historyPatched = false;
+            state.originalPushState = null;
+            state.originalReplaceState = null;
         }
         activeIntervals.forEach((_, id) => {
             try { clearInterval(id); } catch (_) {}
@@ -1228,7 +1292,6 @@
         doc.addEventListener('visibilitychange', state.visibilityHandler);
         
         startRescanInterval();
-        refreshPanelUi();
         log('info', `Timer Accelerator status: ${state.enabled ? 'enabled' : 'disabled'}`);
         log('info', 'Toggle: Ctrl+Alt+T or userscript menu');
     };
@@ -1240,8 +1303,10 @@
     async function setAlwaysRun(value) {
         state.alwaysRun = !!value;
         await gmStore.set(ALWAYS_RUN_KEY, state.alwaysRun);
-        if (!state.alwaysRun && !state.enabled) {
-            await gmStore.set(ENABLE_KEY, false);
+        // When Always Run is turned off, disable the script only if it is currently enabled.
+        // Avoid writing to ENABLE_KEY when the script is already disabled.
+        if (!state.alwaysRun && state.enabled) {
+            await setEnabled(false);
         }
         refreshPanelUi();
         registerMenu();
@@ -1355,7 +1420,11 @@
             utils.findAndAccelerateTimerElements();
             timerAccelerator.accelerateGlobalTimers();
             timerAccelerator.handleCommonPatterns();
-            showNotification('🔍 Rescanning timers...', 'info');
+            if (sharedUi && typeof sharedUi.showToast === 'function') {
+                sharedUi.showToast('🔍 Rescanning timers...', { type: 'info' });
+            } else {
+                log('info', '🔍 Rescanning timers...');
+            }
             log('info', 'Manual rescan triggered');
         });
         uiRefs.rescanBtn = rescanBtn;
@@ -1383,11 +1452,12 @@
     // INITIALIZATION
     //////////////////////////////////////////////////////////////
 
-    observeUrlChanges();
     const savedAlwaysRun = await gmStore.get(ALWAYS_RUN_KEY, false);
     const savedEnabled = await gmStore.get(ENABLE_KEY, false);
     state.alwaysRun = !!savedAlwaysRun;
-    state.enabled = state.alwaysRun ? !!savedEnabled : false;
+    state.enabled = !!savedEnabled;
+
+    observeUrlChanges();
 
     // Try registration now that state/renderPanel/setEnabled are defined
     if (pendingRegistration && typeof pendingRegistration === 'function') {
