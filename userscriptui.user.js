@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Shared UI Manager
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.03.0121
+// @version      2026.01.04.1428
 // @description  Provides a shared hotpink dock + dark modal with per-script tabs, toggles, and persistent layout for all userscripts.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHJlY3QgeD0iMyIgeT0iMyIgd2lkdGg9IjciIGhlaWdodD0iNyIvPjxyZWN0IHg9IjE0IiB5PSIzIiB3aWR0aD0iNyIgaGVpZ2h0PSI3Ii8+PHJlY3QgeD0iMTQiIHk9IjE0IiB3aWR0aD0iNyIgaGVpZ2h0PSI3Ii8+PHJlY3QgeD0iMyIgeT0iMTQiIHdpZHRoPSI3IiBoZWlnaHQ9IjciLz48L3N2Zz4=
@@ -369,8 +369,9 @@
 
           const expandIcon = SAFE_DOC.createElement('span');
           expandIcon.className = 'expand-icon';
-          expandIcon.textContent = '▼';
           expandIcon.title = 'Expand/collapse';
+          expandIcon.setAttribute('role', 'button');
+          expandIcon.setAttribute('aria-label', 'Expand or collapse tab');
 
           const titleBtn = SAFE_DOC.createElement('button');
           titleBtn.type = 'button';
@@ -393,6 +394,8 @@
         const isCollapsed = state.collapsed.has(entry.id);
         entry.row.el.classList.toggle('collapsed', isCollapsed);
         entry.row.el.classList.toggle('active', entry.id === state.activeId);
+        entry.row.expandIcon.textContent = isCollapsed ? '▶' : '▼';
+        entry.row.expandIcon.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
         entry.row.stateLabel.textContent = entry.enabled ? 'ON' : 'OFF';
         entry.row.toggleBtn.textContent = entry.enabled ? 'Disable' : 'Enable';
         fragment.appendChild(entry.row.el);

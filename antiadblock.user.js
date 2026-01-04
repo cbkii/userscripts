@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.03.0121
+// @version      2026.01.04.1428
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDIyczgtNCA4LTEwVjVsLTgtMy04IDN2N2MwIDYgOCAxMCA4IDEweiIvPjwvc3ZnPg==
@@ -413,7 +413,8 @@
       fingerprintTweaks: false,
       domHardening: false,
       broadOverlaySelectors: false,
-      scriptlets: false
+      scriptlets: false,
+      enableGoogleAdsMocking: false
     }),
     medium: Object.freeze({
       overlay: true,
@@ -428,7 +429,8 @@
       fingerprintTweaks: false,
       domHardening: false,
       broadOverlaySelectors: false,
-      scriptlets: true
+      scriptlets: true,
+      enableGoogleAdsMocking: false
     }),
     nuclear: Object.freeze({
       overlay: true,
@@ -443,7 +445,8 @@
       fingerprintTweaks: true,
       domHardening: true,
       broadOverlaySelectors: true,
-      scriptlets: true
+      scriptlets: true,
+      enableGoogleAdsMocking: true
     })
   });
 
@@ -1345,10 +1348,12 @@
 
   function unfreezeScroll() {
     try {
-      const wasLocked = document.documentElement.style.overflow !== 'auto' || 
-                        (document.body && document.body.style.overflow !== 'auto');
-      document.documentElement.style.overflow = 'auto';
-      if (document.body) document.body.style.overflow = 'auto';
+      const docEl = document.documentElement;
+      const body = document.body;
+      const wasLocked = window.getComputedStyle(docEl).overflow !== 'auto' ||
+                        (body && window.getComputedStyle(body).overflow !== 'auto');
+      docEl.style.overflow = 'auto';
+      if (body) body.style.overflow = 'auto';
       if (wasLocked) {
         log('info', 'Scroll unfrozen');
       }
@@ -1635,19 +1640,50 @@
 
   // Google Ads Infrastructure Mocking (early injection for detection bypass)
   // Mock common Google Ads objects and methods to neutralize ad-block detection
+  // Only runs in nuclear mode to prevent breaking websites
   const mockGoogleAdsInfrastructure = () => {
     try {
       const win = window;
       
-      // Mock GPT (Google Publisher Tags)
-      if (!win.googletag) {
-        win.googletag = win.googletag || {};
-        win.googletag.cmd = win.googletag.cmd || [];
-        win.googletag.cmd.push = function() { 
-          dbg('GoogleAds: Intercepted googletag.cmd.push');
-          return Array.prototype.push.apply(this, arguments);
-        };
+      // Helper to define immutable properties
+      const defineImmutable = (obj, prop, value) => {
+        try {
+          Object.defineProperty(obj, prop, {
+            value,
+            writable: false,
+            configurable: false,
+            enumerable: false
+          });
+        } catch (e) {
+          try {
+            obj[prop] = value;
+          } catch (_) {
+            // ignore if we cannot set the property
+          }
+        }
+      };
+      
+      // Mock GPT (Google Publisher Tags) - check each property individually
+      if (!win.googletag || typeof win.googletag !== 'object') {
+        win.googletag = {};
+      }
+      if (!win.googletag.cmd || !Array.isArray(win.googletag.cmd)) {
+        win.googletag.cmd = [];
+      }
+      // Override push to prevent command execution
+      win.googletag.cmd.push = function() {
+        dbg('GoogleAds: Intercepted googletag.cmd.push');
+        // Do not actually enqueue or execute commands; just simulate length growth
+        const currentLength = Number(this.length) >>> 0;
+        const newLength = currentLength + arguments.length;
+        this.length = newLength;
+        return newLength;
+      };
+      
+      if (!win.googletag.apiReady) {
         win.googletag.apiReady = true;
+      }
+      if (!win.googletag.defineSlot) {
         win.googletag.defineSlot = function() { 
           dbg('GoogleAds: Mock googletag.defineSlot called');
           return {
@@ -1657,6 +1693,8 @@
             defineSizeMapping: function() { return this; }
           };
         };
+      }
+      if (!win.googletag.pubads) {
         win.googletag.pubads = function() {
           return {
             enableSingleRequest: function() {},
@@ -1669,21 +1707,36 @@
             set: function() {}
           };
         };
+      }
+      if (!win.googletag.enableServices) {
         win.googletag.enableServices = function() { dbg('GoogleAds: Mock googletag.enableServices'); };
+      }
+      if (!win.googletag.display) {
         win.googletag.display = function() { dbg('GoogleAds: Mock googletag.display'); };
-        log('info', 'Google Ads: Mocked googletag (GPT)');
       }
+      log('info', 'Google Ads: Mocked googletag (GPT)');
       
-      // Mock adsbygoogle
-      if (!win.adsbygoogle) {
-        win.adsbygoogle = [];
-        const originalPush = win.adsbygoogle.push;
-        win.adsbygoogle.push = function() {
-          dbg('GoogleAds: Intercepted adsbygoogle.push');
-          log('info', 'Google Ads: adsbygoogle.push intercepted');
-          return originalPush ? originalPush.apply(this, arguments) : 0;
-        };
-      }
+      // Mock adsbygoogle using Object.defineProperty for better interception
+      let adsbygoogleProxy = [];
+      Object.defineProperty(win, 'adsbygoogle', {
+        get: () => adsbygoogleProxy,
+        set: (val) => {
+          // Intercept if it's an array and doesn't have our custom push
+          if (Array.isArray(val) && !val.isMocked) {
+            const originalPush = val.push;
+            val.push = function() {
+              dbg('GoogleAds: Intercepted adsbygoogle.push');
+              log('info', 'Google Ads: adsbygoogle.push intercepted');
+              return Array.prototype.push.apply(this, arguments);
+            };
+            val.isMocked = true;
+          }
+          adsbygoogleProxy = val;
+        },
+        configurable: true
+      });
+      // Ensure initial value is also mocked
+      win.adsbygoogle = win.adsbygoogle || [];
       
       // Mock Google Ad Loader
       if (!win.google_ad_client) {
@@ -1705,15 +1758,15 @@
       // Mock AdSense fields
       win.adsbygoogle_apstagSlots = win.adsbygoogle_apstagSlots || [];
       
-      // Spoof common anti-adblock detection variables
-      win.canRunAds = true;
-      win.adsBlocked = false;
-      win.hasAdblock = false;
-      win.adBlockEnabled = false;
-      win.blockAdBlock = undefined;
-      win.FuckAdBlock = undefined;
-      win.fuckAdBlock = undefined;
-      win.BlockAdBlock = undefined;
+      // Spoof common anti-adblock detection variables using immutable properties
+      defineImmutable(win, 'canRunAds', true);
+      defineImmutable(win, 'adsBlocked', false);
+      defineImmutable(win, 'hasAdblock', false);
+      defineImmutable(win, 'adBlockEnabled', false);
+      defineImmutable(win, 'blockAdBlock', undefined);
+      defineImmutable(win, 'FuckAdBlock', undefined);
+      defineImmutable(win, 'fuckAdBlock', undefined);
+      defineImmutable(win, 'BlockAdBlock', undefined);
       
       log('info', 'Google Ads: Infrastructure mocking complete');
     } catch (e) {
@@ -1721,8 +1774,10 @@
     }
   };
   
-  // Inject Google Ads mocking immediately (document-start)
-  mockGoogleAdsInfrastructure();
+  // Only run Google Ads mocking for nuclear profile
+  if (state0.features && state0.features.enableGoogleAdsMocking) {
+    mockGoogleAdsInfrastructure();
+  }
 
   (async () => {
     try {
@@ -1856,7 +1911,7 @@
               };
               
               Object.keys(globalVars).forEach(key => {
-                if (key in window && window[key] !== globalVars[key]) {
+                if (window.hasOwnProperty(key) && window[key] !== globalVars[key]) {
                   window[key] = globalVars[key];
                   spoofedCount++;
                   log('info', `Global spoofing: Set window.${key} = ${globalVars[key]}`);
@@ -1994,6 +2049,14 @@
     const modeButtons = document.createElement('div');
     modeButtons.style.cssText = 'display: flex; gap: 6px; flex-wrap: wrap;';
     
+    // Helper function to determine if a mode is active
+    const isModeActive = (mode, site, currentProfile) => {
+      if (mode.name === 'off') {
+        return site.enabled === false;
+      }
+      return currentProfile === mode.name && site.enabled !== false;
+    };
+    
     const modes = [
       { name: 'off', label: 'OFF', desc: 'Disable for this site', color: '#6b7280' },
       { name: 'safe', label: 'SAFE', desc: 'Conservative (for sensitive sites)', color: '#3b82f6' },
@@ -2007,8 +2070,8 @@
       btn.type = 'button';
       btn.textContent = mode.label;
       btn.title = mode.desc;
-      const isActive = (mode.name === 'off' && site.enabled === false) || 
-                       (mode.name !== 'off' && currentProfile === mode.name && site.enabled !== false);
+      const isActive = isModeActive(mode, site, currentProfile);
+      btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
       btn.style.cssText = `
         padding: 6px 12px;
         border-radius: 6px;
