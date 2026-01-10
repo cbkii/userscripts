@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PGxpbmUgeDE9IjEyIiB5MT0iMTgiIHgyPSIxMiIgeTI9IjEyIi8+PHBvbHlsaW5lIHBvaW50cz0iOSAxNSAxMiAxOCAxNSAxNSIvPjwvc3ZnPg==
-// @version      2026.01.10.0804
+// @version      2026.01.10.0820
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -959,12 +959,15 @@
     if (!GMX.hasDownload) {
       return { attempted: false };
     }
+    const hasAsyncDownload = typeof GM !== 'undefined' && GM && typeof GM.download === 'function';
+    const cleanupDelay = hasAsyncDownload ? DOWNLOAD_ANCHOR_DELAY_MS : BLOB_REVOKE_MS;
     if (info && info.downloadMode === 'disabled') {
       return { attempted: true, success: false, method: 'gm-download', error: new Error('Downloads disabled') };
     }
     let fallbackResult = null;
     let resolveLegacy = null;
     let resolveMobileFallback = null;
+    let fallbackTriggered = false;
     const legacyCompletion = new Promise((resolve) => {
       resolveLegacy = resolve;
     });
@@ -974,6 +977,8 @@
       })
       : null;
     const handleError = async (err) => {
+      if (fallbackTriggered) return;
+      fallbackTriggered = true;
       resource.markStale();
       fallbackResult = await fallback(err);
       if (resolveLegacy) {
@@ -1014,11 +1019,12 @@
       saveAs: false,
       ...(isMobileBrowser ? { confirm: false } : {}),
       onload: () => {
+        if (fallbackTriggered) return;
         if (resolveMobileFallback) {
           resolveMobileFallback({ success: true });
           resolveMobileFallback = null;
         }
-        resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+        resource.cleanup(cleanupDelay);
         if (resolveLegacy) {
           resolveLegacy({ success: true });
           resolveLegacy = null;
@@ -1038,7 +1044,7 @@
       let fallbackTimerId = null;
       if (isMobileBrowser) {
         fallbackTimerId = setTimeout(async () => {
-          fallbackResult = await fallback(new Error('Mobile GM_download timeout'));
+          await handleError(new Error('Mobile GM_download timeout'));
           if (resolveMobileFallback) {
             resolveMobileFallback({ success: false });
             resolveMobileFallback = null;
@@ -1050,7 +1056,8 @@
           if (fallbackTimerId) {
             clearTimeout(fallbackTimerId);
           }
-          resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+          if (fallbackTriggered) return;
+          resource.cleanup(cleanupDelay);
           if (resolveMobileFallback) {
             resolveMobileFallback({ success: true });
             resolveMobileFallback = null;
@@ -1072,6 +1079,9 @@
       } else if (!isMobileBrowser) {
         await legacyCompletion;
         resolveLegacy = null;
+        if (!fallbackTriggered) {
+          resource.cleanup(cleanupDelay);
+        }
       }
       if (mobileFallback) {
         await mobileFallback;

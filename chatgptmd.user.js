@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.10.0804
+// @version      2026.01.10.0820
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions. UI integrated with shared userscript panel.
 // @author       cbcoz
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTIxIDE1djRhMiAyIDAgMCAxLTIgMkg1YTIgMiAwIDAgMS0yLTJ2LTQiLz48cG9seWxpbmUgcG9pbnRzPSI3IDEwIDEyIDE1IDE3IDEwIi8+PGxpbmUgeDE9IjEyIiB5MT0iMTUiIHgyPSIxMiIgeTI9IjMiLz48L3N2Zz4=
@@ -1440,7 +1440,7 @@
 
     try {
       if (gmDownloadLegacy || gmDownloadAsync) {
-        const cleanupDelay = DOWNLOAD_ANCHOR_DELAY_MS;
+        const cleanupDelay = gmDownloadAsync ? DOWNLOAD_ANCHOR_DELAY_MS : BLOB_REVOKE_MS;
         let downloadUrl = resource.getUrl();
         if (isMobileBrowser) {
           try {
@@ -1456,11 +1456,19 @@
           }
         }
         let fallbackTimerId = null;
+        let fallbackTriggered = false;
         const clearFallbackTimer = () => {
           if (fallbackTimerId) {
             clearTimeout(fallbackTimerId);
             fallbackTimerId = null;
           }
+        };
+        const triggerFallback = () => {
+          if (fallbackTriggered) return;
+          fallbackTriggered = true;
+          clearFallbackTimer();
+          resource.markStale();
+          fallback();
         };
         const detail = {
           url: downloadUrl,
@@ -1468,36 +1476,39 @@
           saveAs: true,
           ...(isMobileBrowser ? { confirm: false } : {}),
           onload: () => {
+            if (fallbackTriggered) return;
             clearFallbackTimer();
             resource.cleanup(cleanupDelay);
           },
           onerror: () => {
-            clearFallbackTimer();
-            resource.markStale();
-            fallback();
+            triggerFallback();
           }
         };
         const result = gmDownloadAsync ? gmDownloadAsync(detail) : gmDownloadLegacy(detail);
         if (isMobileBrowser) {
           fallbackTimerId = setTimeout(() => {
-            resource.markStale();
-            fallback();
+            triggerFallback();
           }, MOBILE_FALLBACK_DELAY_MS);
         }
         if (result && typeof result.then === 'function') {
           const promise = result.then(() => {
+            if (fallbackTriggered) return;
             clearFallbackTimer();
             resource.cleanup(cleanupDelay);
           }).catch(() => {
-            clearFallbackTimer();
-            resource.markStale();
-            fallback();
+            triggerFallback();
           });
           if (!isMobileBrowser) {
             await promise;
           }
         } else {
-          setTimeout(() => resource.cleanup(cleanupDelay), cleanupDelay);
+          if (!fallbackTriggered) {
+            setTimeout(() => {
+              if (!fallbackTriggered) {
+                resource.cleanup(cleanupDelay);
+              }
+            }, cleanupDelay);
+          }
         }
         return true;
       }
