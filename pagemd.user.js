@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.10.0842
+// @version      2026.01.10.0913
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PHBhdGggZD0iTTEwIDEzaDQiLz48cGF0aCBkPSJNMTAgMTdoNCIvPjxwYXRoIGQ9Ik0xMCA5aDIiLz48L3N2Zz4=
@@ -597,7 +597,7 @@
     try {
       const blob = resource.getBlob();
       // Only convert to data URL if size is reasonable (< 2MB for mobile compatibility)
-      if (blob.size < MAX_DATA_URL_FILE_SIZE_BYTES) {
+      if (blob.size <= MAX_DATA_URL_FILE_SIZE_BYTES) {
         const reader = new FileReader();
         const dataUrlPromise = new Promise((resolve, reject) => {
           reader.onload = () => resolve(reader.result);
@@ -625,7 +625,7 @@
     let fallbackTimerId = null;
     let fallbackTriggered = false;
     const clearFallbackTimer = () => {
-      if (fallbackTimerId) {
+      if (fallbackTimerId !== null) {
         clearTimeout(fallbackTimerId);
         fallbackTimerId = null;
       }
@@ -653,12 +653,12 @@
       },
     };
     try {
-      const result = gmDownloadAsync ? gmDownloadAsync(detail) : gmDownloadLegacy(detail);
       if (isMobileBrowser) {
         fallbackTimerId = setTimeout(() => {
           triggerFallback(new Error('Mobile GM_download timeout'));
         }, MOBILE_FALLBACK_DELAY_MS);
       }
+      const result = gmDownloadAsync ? gmDownloadAsync(detail) : gmDownloadLegacy(detail);
       if (result && typeof result.then === 'function') {
         const promise = result.then(() => {
           if (fallbackTriggered) return;
