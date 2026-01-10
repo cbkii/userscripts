@@ -36,10 +36,6 @@ The repository emphasizes:
 
 - **userscriptui.user.js** — Provides a lightweight, mobile-friendly UI framework. Enhances and integrates with many scripts in this repo; not required, but recommended for full UI support.
 
-- **userscriptlogs.user.js** — Adds centralised viewing and clearing of script logs via on-page dialog. Optional, but allows all scripts here to share and display log data efficiently.
-
-> Both scripts are optional, but provide enhanced UI and logging features when installed alongside any other scripts in this collection. 
-
 ## Load Order & Concurrency
 
 When multiple userscripts run on the same page, **load order matters** for proper operation. Scripts in this repository are designed to handle concurrent execution, but some have dependencies or can conflict if not loaded correctly.
@@ -59,7 +55,6 @@ Install scripts in this order for best compatibility:
 9. **pagemd.user.js** — Page to Markdown converter (document-idle)
 10. **chatgptmd.user.js** — ChatGPT export (document-idle)
 11. **pageinfoexport.user.js** — Page metadata export (document-idle)
-12. **userscriptlogs.user.js** — Log viewer (document-idle, should load last)
 
 ### Why Load Order Matters
 
@@ -71,7 +66,7 @@ Install scripts in this order for best compatibility:
 
 **Document Processing (9-11):** Heavy scripts that extract/convert content load at document-idle after the page is fully interactive, preventing slowdowns during initial load.
 
-**Utilities (12):** Log viewer depends on other scripts having created log entries, so it loads last.
+**Utilities:** The shared UI script should load first when installed.
 
 ### Concurrency Safeguards
 
@@ -105,7 +100,7 @@ XBrowser loads scripts in the order they appear in the script manager list. To r
 
 ## API and Compatibility
 
-- **XBrowser**: All scripts target maximum compatibility with the built-in Android script manager, using features in [API-doc.md](./API-doc.md).
+- **XBrowser**: All scripts target maximum compatibility with the built-in Android script manager, using features in [API-doc.md](./docs/API-doc.md).
 - **Tampermonkey**: Full API, but minor differences possible.
 - **Others**: Not guaranteed, but usually work.
 
@@ -115,7 +110,7 @@ If you find a site where a script doesn’t function, or you spot API/compat iss
 
 ## Contributing
 
-- All contributions must adhere to [AGENTS.md](./AGENTS.md) and consult [API-doc.md](./API-doc.md).
+- All contributions must adhere to [AGENTS.md](./AGENTS.md) and consult [API-doc.md](./docs/API-doc.md).
 - Scripts **must be Android-first** (XBrowser as baseline).
 - Code style: modern JS, strict metadata, English-only comments and UI.
 - See PR/commit rules in [AGENTS.md](./AGENTS.md).

@@ -2,7 +2,7 @@
 
 This repository contains **userscripts**. Developer agents (Codex/Copilot/etc.) must follow this guide when creating or updating scripts so they remain **fast, safe, maintainable, and portable** across script managers — with **Android XBrowser compatibility prioritised above all**.
 
-**Mandatory API reference:** every userscript must be authored with a deep understanding of the repository API guidance in **[API-doc.md](./API-doc.md)**. Review it before designing behavior, metadata, permissions, or DOM interactions, and keep it open while implementing changes.
+**Mandatory API reference:** every userscript must be authored with a deep understanding of the repository API guidance in **[API-doc.md](./docs/API-doc.md)**. Review it before designing behavior, metadata, permissions, or DOM interactions, and keep it open while implementing changes.
 
 ---
 
@@ -20,7 +20,7 @@ A change is complete only when all items below are true:
   - **XBrowser** (Android) using its built-in script manager (priority)
 - Clear manual test steps are included in the PR/commit message or `docs/<script>.md`.
 - `@version` is bumped for any functional change, and update hosting behaviour is correct.
-- API usage aligns with **[API-doc.md](./API-doc.md)** (read and applied for every script change).
+- API usage aligns with **[API-doc.md](./docs/API-doc.md)** (read and applied for every script change).
 
 ---
 
@@ -33,7 +33,7 @@ A change is complete only when all items below are true:
 ### Repo-wide patterns (apply unless overridden)
 - Persist enable/disable state per script with `GM_getValue`/`GM_setValue` using key `${id}.enabled`, expose a menu toggle (`GM_registerMenuCommand` + optional unregister).
 - Register with the shared UI manager (`userscriptui.user.js`) when available, but ensure the script still runs with its own UI and commands if the shared UI is missing.
-- Use the logging helper pattern that scrubs sensitive values and stores capped entries under `userscript.logs.<short>`.
+- Use the logging helper pattern that scrubs sensitive values and logs to the browser console with consistent prefixes.
 - Keep UI idempotent and teardown-safe: disconnect observers, remove injected DOM, and clear timers on disable.
 
 ### Dependencies and updates (single-file only)
@@ -230,7 +230,6 @@ Where feasible:
 ### 7.4 Secure logging practices
 - Use a single `createLogger(...)` helper per script to keep logging consistent and minimal.
 - Keep `LOG_PREFIX` concise (short tag in square brackets, e.g., `[pmd]`).
-- Store logs under `GM_setValue('userscript.logs.<short>')` with a capped list size.
 - Redact sensitive data (tokens, auth/session values, passwords, cookies) and strip URL queries/hashes.
 - Avoid logging full DOM nodes, page content, or large payloads; keep logs useful, not exhaustive.
 - Emit console output only for `warn`/`error` or when debug is explicitly enabled.
@@ -310,7 +309,7 @@ When targeting XBrowser:
 
 ## 12) Canonical script template (copy/paste)
 
-You **must** follow **[AGENTS-boilerplate.md](./AGENTS-boilerplate.md)** for the required metadata, scaffold, formatting, and shared UI/logging integration template applied across all scripts. Deviations require explicit justification in review notes.
+You **must** follow **[AGENTS-boilerplate.md](./docs/AGENTS-boilerplate.md)** for the required metadata, scaffold, formatting, and shared UI/logging integration template applied across all scripts. Deviations require explicit justification in review notes.
 
 ---
 
@@ -324,7 +323,7 @@ When asked to build or update a script:
 4. List required permissions:
    - `@grant` APIs
    - `@connect` domains (if any)
-5. Review and apply the guidance in **[API-doc.md](./API-doc.md)** before implementing.
+5. Review and apply the guidance in **[API-doc.md](./docs/API-doc.md)** before implementing.
 6. Implement:
    - idempotent DOM updates
    - SPA-safe navigation handling (if needed)
@@ -488,8 +487,8 @@ Add new validation logic to `/dev/scripts/lint.js` or `/dev/scripts/test.js`.
 
 ### Core Documentation (Required Reading)
 
-- **[API-doc.md](./API-doc.md)** — Authoritative API guidance for all scripts (XBrowser compatibility reference)
-- **[AGENTS-boilerplate.md](./AGENTS-boilerplate.md)** — Scaffold, formatting, and shared UI/logging integration rules
+- **[API-doc.md](./docs/API-doc.md)** — Authoritative API guidance for all scripts (XBrowser compatibility reference)
+- **[AGENTS-boilerplate.md](./docs/AGENTS-boilerplate.md)** — Scaffold, formatting, and shared UI/logging integration rules
 - **[BEST-PRACTICES-CHECKLIST.md](./docs/BEST-PRACTICES-CHECKLIST.md)** — Quick reference checklist for ensuring scripts meet industry standards
 - **[RESEARCH-FINDINGS.md](./docs/RESEARCH-FINDINGS.md)** — Comprehensive analysis comparing this repository against industry best practices
 
@@ -874,7 +873,7 @@ const GMX = {
 **Cause:** Copy-pasted bootstrap code with slight variations.
 
 **Solution:**
-- Use canonical bootstrap pattern (see AGENTS-boilerplate.md)
+- Use canonical bootstrap pattern (see docs/AGENTS-boilerplate.md)
 - Listen for `userscriptSharedUiReady` event exactly once
 - Don't duplicate `setTimeout(() => { ... }, 0)` wrappers
 - Check `registrationAttempted` flag before re-registering
@@ -939,4 +938,3 @@ npm run validate  # Both lint + test
 - Single-file userscripts only
 
 ---
-

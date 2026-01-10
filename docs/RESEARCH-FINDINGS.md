@@ -32,8 +32,8 @@ This document presents findings from comprehensive research into userscript best
 
 4. **Repository Documentation**
    - AGENTS.md (comprehensive development guide)
-   - API-doc.md (XBrowser compatibility reference)
-   - AGENTS-boilerplate.md (template standards)
+   - docs/API-doc.md (XBrowser compatibility reference)
+   - docs/AGENTS-boilerplate.md (template standards)
    - README.md (user-facing documentation)
 
 ---
@@ -151,7 +151,7 @@ Only 6 grants for a full-featured export tool—minimal and justified.
 
 **Repository Status:** ✅ **Excellent**
 
-**Standard Structure (from AGENTS-boilerplate.md):**
+**Standard Structure (from docs/AGENTS-boilerplate.md):**
 ```javascript
 (() => {
   'use strict';
@@ -232,7 +232,7 @@ Delays heavy work after idle—good pattern.
 **Unique Strength: Structured Logger**
 Every script uses a standardized logger (pagemd.user.js, lines 73-147):
 ```javascript
-const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
+const createLogger = ({ prefix, debug }) => {
   const SENSITIVE_KEY_RE = /pass(word)?|token|secret|auth|session|cookie|key/i;
   
   const scrubString = (value) => {
@@ -246,16 +246,11 @@ const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
     // Detects and redacts sensitive keys
     // Describes DOM elements instead of logging full nodes
   };
-  
-  const writeEntry = async (level, message, meta) => {
-    // Stores to GM_setValue with capped list (200 entries)
-    // Compatible with userscriptlogs.user.js viewer
-  };
 };
 ```
 
 **Comparison to Industry:**
-Most userscripts use raw console.log with no scrubbing—this repository's approach is **professional-grade**.
+Most userscripts use raw console.log with no scrubbing—this repository's scrubbed, consistent console logging is **professional-grade**.
 
 ### 6. DOM Manipulation Safety
 
@@ -311,7 +306,7 @@ const isTouch = () => 'ontouchstart' in SAFE_DOC.documentElement;
 const clickEvent = isTouch() ? 'touchstart' : 'click';
 ```
 
-**API Compatibility (API-doc.md):**
+**API Compatibility (docs/API-doc.md):**
 - Documents XBrowser-specific metadata values
 - Warns about feature differences vs Tampermonkey
 - Provides fallback patterns for unsupported APIs
@@ -406,8 +401,8 @@ const scrubString = (value) => {
 **Documentation Assets:**
 1. **README.md**: Clear, concise, user-friendly
 2. **AGENTS.md**: Comprehensive 24-section developer guide (rare depth)
-3. **API-doc.md**: XBrowser compatibility reference
-4. **AGENTS-boilerplate.md**: Template with integration patterns
+3. **docs/API-doc.md**: XBrowser compatibility reference
+4. **docs/AGENTS-boilerplate.md**: Template with integration patterns
 5. **docs/**: Per-script notes (when needed)
 
 **Unique Strengths:**
@@ -471,11 +466,10 @@ if (alwaysRun) {
 
 **This Repository's Solution**:
 - Standard logger structure across all scripts
-- Logs stored in GM_setValue with capped list (200 entries)
-- Separate `userscriptlogs.user.js` provides unified viewer
-- All logs accessible via shared UI panel
+- Scrubbed, consistent console output with debug gating
+- No UI or storage dependencies for logs
 
-**Impact**: Troubleshooting across multiple scripts is trivial. **Professional-grade approach**.
+**Impact**: Troubleshooting across multiple scripts remains consistent without adding UI overhead.
 
 ### 4. Dependency Hygiene Enforcement
 
@@ -585,7 +579,7 @@ if (alwaysRun) {
      };
    };
    ```
-   **Location**: AGENTS-boilerplate.md
+   **Location**: docs/AGENTS-boilerplate.md
 
 2. **Add CDN Fallback Pattern**
    ```javascript
@@ -610,7 +604,7 @@ if (alwaysRun) {
      console.log(performance.getEntriesByName('script-duration')[0].duration);
    }
    ```
-   **Location**: AGENTS-boilerplate.md
+   **Location**: docs/AGENTS-boilerplate.md
 
 ### Priority 3: Infrastructure (Larger Effort)
 

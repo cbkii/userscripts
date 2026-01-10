@@ -48,8 +48,7 @@ Quick reference for developers: ensure your userscripts meet industry standards.
 - [ ] Wraps risky operations in try/catch
 - [ ] Uses structured logger from boilerplate
 - [ ] Scrubs sensitive data (tokens, passwords, URLs)
-- [ ] Caps log storage (default 200 entries)
-- [ ] Stores logs in `userscript.logs.<scriptid>` key
+- [ ] Logs to console with consistent prefix and scrubbed metadata
 - [ ] Only logs to console when DEBUG=true or level=error/warn
 - [ ] Provides meaningful error messages
 
