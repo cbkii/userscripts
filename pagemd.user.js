@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.04.1428
+// @version      2026.01.10.0804
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PHBhdGggZD0iTTEwIDEzaDQiLz48cGF0aCBkPSJNMTAgMTdoNCIvPjxwYXRoIGQ9Ik0xMCA5aDIiLz48L3N2Zz4=
@@ -449,7 +449,10 @@
   const gmDownloadAsync = typeof GM !== 'undefined' && GM && typeof GM.download === 'function'
     ? GM.download.bind(GM)
     : null;
+  const isMobileBrowser = typeof navigator !== 'undefined'
+    && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
   const DOWNLOAD_ANCHOR_DELAY_MS = 500;
+  const MOBILE_FALLBACK_DELAY_MS = 1200;
   const BLOB_STALE_MS = 10000;
   const BLOB_REVOKE_MS = 120000;
 
@@ -588,7 +591,7 @@
   const downloadViaGM = async (resource, filename, fallback) => {
     if (!gmDownloadLegacy && !gmDownloadAsync) return false;
     
-    // XBrowser compatibility: prefer data URL for better mobile download manager support
+    // Mobile compatibility: prefer data URL for better download manager support
     // Blob URLs may fail silently on some Android browsers
     let downloadUrl = resource.getUrl();
     try {
@@ -618,23 +621,49 @@
       // Use blob URL if any error occurs
     }
     
+    let fallbackTimerId = null;
+    const clearFallbackTimer = () => {
+      if (fallbackTimerId) {
+        clearTimeout(fallbackTimerId);
+        fallbackTimerId = null;
+      }
+    };
+
     const detail = {
       url: downloadUrl,
       name: filename,
-      saveAs: false, // XBrowser may handle saveAs=false better on mobile
-      onload: () => resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS),
+      saveAs: false,
+      ...(isMobileBrowser ? { confirm: false } : {}),
+      onload: () => {
+        clearFallbackTimer();
+        resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+      },
       onerror: (err) => {
+        clearFallbackTimer();
         resource.markStale();
         fallback(err);
       },
     };
     try {
       const result = gmDownloadAsync ? gmDownloadAsync(detail) : gmDownloadLegacy(detail);
+      if (isMobileBrowser) {
+        fallbackTimerId = setTimeout(() => {
+          resource.markStale();
+          fallback(new Error('Mobile GM_download timeout'));
+        }, MOBILE_FALLBACK_DELAY_MS);
+      }
       if (result && typeof result.then === 'function') {
-        await result.then(() => resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS)).catch((err) => {
+        const promise = result.then(() => {
+          clearFallbackTimer();
+          resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS);
+        }).catch((err) => {
+          clearFallbackTimer();
           resource.markStale();
           fallback(err);
         });
+        if (!isMobileBrowser) {
+          await promise;
+        }
       } else {
         setTimeout(() => resource.cleanup(DOWNLOAD_ANCHOR_DELAY_MS), DOWNLOAD_ANCHOR_DELAY_MS);
       }

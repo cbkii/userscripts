@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.30.0146
+// @version      2026.01.10.0804
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions. UI integrated with shared userscript panel.
 // @author       cbcoz
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTIxIDE1djRhMiAyIDAgMCAxLTIgMkg1YTIgMiAwIDAgMS0yLTJ2LTQiLz48cG9seWxpbmUgcG9pbnRzPSI3IDEwIDEyIDE1IDE3IDEwIi8+PGxpbmUgeDE9IjEyIiB5MT0iMTUiIHgyPSIxMiIgeTI9IjMiLz48L3N2Zz4=
@@ -70,9 +70,13 @@
   const gmDownloadAsync = typeof GM !== 'undefined' && GM && typeof GM.download === 'function'
     ? GM.download.bind(GM)
     : null;
+  const isMobileBrowser = typeof navigator !== 'undefined'
+    && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
   const DOWNLOAD_ANCHOR_DELAY_MS = 500;
+  const MOBILE_FALLBACK_DELAY_MS = 1200;
   const BLOB_STALE_MS = 10000;
   const BLOB_REVOKE_MS = 120000;
+  const MAX_DATA_URL_FILE_SIZE_BYTES = 2 * 1024 * 1024;
 
   //////////////////////////////////////////////////////////////
   // UTILITIES & HELPERS
@@ -506,7 +510,7 @@
 
     const { content, filename, mimeType } = exportData;
     if (action === 'download') {
-      mobileDownload(content, filename, mimeType);
+      await mobileDownload(content, filename, mimeType);
     } else if (action === 'copy') {
       await copyToClipboard(content);
     } else if (action === 'share') {
@@ -1419,7 +1423,14 @@
     }
   };
 
-  function mobileDownload(content, filename, mimeType = 'text/plain') {
+  const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(new Error('Failed to read blob as data URL'));
+    reader.readAsDataURL(blob);
+  });
+
+  async function mobileDownload(content, filename, mimeType = 'text/plain') {
     const resource = createDownloadResource(content, `${mimeType};charset=utf-8`);
     const fallback = () => {
       if (!anchorDownload(resource, filename)) {
@@ -1429,27 +1440,62 @@
 
     try {
       if (gmDownloadLegacy || gmDownloadAsync) {
-        const usingLegacyOnly = !!gmDownloadLegacy && !gmDownloadAsync;
-        const cleanupDelay = gmDownloadAsync ? DOWNLOAD_ANCHOR_DELAY_MS : BLOB_REVOKE_MS;
+        const cleanupDelay = DOWNLOAD_ANCHOR_DELAY_MS;
+        let downloadUrl = resource.getUrl();
+        if (isMobileBrowser) {
+          try {
+            const blob = resource.getBlob();
+            if (blob.size < MAX_DATA_URL_FILE_SIZE_BYTES) {
+              downloadUrl = await blobToDataUrl(blob);
+            }
+          } catch (err) {
+            if (DEBUG) {
+              log('warn', 'Failed to convert blob to data URL, falling back to blob URL', { error: err?.message || String(err) });
+            }
+            downloadUrl = resource.getUrl();
+          }
+        }
+        let fallbackTimerId = null;
+        const clearFallbackTimer = () => {
+          if (fallbackTimerId) {
+            clearTimeout(fallbackTimerId);
+            fallbackTimerId = null;
+          }
+        };
         const detail = {
-          url: resource.getUrl(),
+          url: downloadUrl,
           name: filename,
           saveAs: true,
-          onload: () => resource.cleanup(cleanupDelay),
+          ...(isMobileBrowser ? { confirm: false } : {}),
+          onload: () => {
+            clearFallbackTimer();
+            resource.cleanup(cleanupDelay);
+          },
           onerror: () => {
+            clearFallbackTimer();
             resource.markStale();
             fallback();
-          },
+          }
         };
         const result = gmDownloadAsync ? gmDownloadAsync(detail) : gmDownloadLegacy(detail);
-        if (usingLegacyOnly) {
-          fallback();
+        if (isMobileBrowser) {
+          fallbackTimerId = setTimeout(() => {
+            resource.markStale();
+            fallback();
+          }, MOBILE_FALLBACK_DELAY_MS);
         }
         if (result && typeof result.then === 'function') {
-          result.then(() => resource.cleanup(cleanupDelay)).catch(() => {
+          const promise = result.then(() => {
+            clearFallbackTimer();
+            resource.cleanup(cleanupDelay);
+          }).catch(() => {
+            clearFallbackTimer();
             resource.markStale();
             fallback();
           });
+          if (!isMobileBrowser) {
+            await promise;
+          }
         } else {
           setTimeout(() => resource.cleanup(cleanupDelay), cleanupDelay);
         }
