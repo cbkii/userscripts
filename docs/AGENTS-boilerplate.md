@@ -57,7 +57,6 @@ This is the **canonical scaffold** for all userscripts in this repo. Apply it to
 
   const DEBUG = false;
   const LOG_PREFIX = '[<short>]';
-  const LOG_STORAGE_KEY = 'userscript.logs.<short>';
   const SCRIPT_ID = '<short>';
   const SCRIPT_TITLE = '<Human Title>';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
@@ -123,18 +122,15 @@ This is the **canonical scaffold** for all userscripts in this repo. Apply it to
 - Menu commands are the ONLY fallback when shared UI is unavailable - they provide basic functionality without visual clutter.
 - UI content must be touch-friendly, dark-themed, and idempotent.
 
-## Userscript logs (`userscriptlogs.user.js`)
+## Logging (console-only)
 
-- Log keys must be prefixed `userscript.logs.<short>`.
 - Do not record sensitive values (tokens, cookies, PII); scrub query params and long strings.
-- Provide a clear path to view/clear logs via:
-  - Shared UI panel **and**
-  - Fallback modal/menu command when shared UI is unavailable.
+- Use a consistent log prefix and gate `console.log` behind the DEBUG flag.
+- Always emit `console.warn` and `console.error` for warnings/errors.
 
 ## Storage, naming, and common patterns
 
 - State keys: `${scriptId}.enabled`, `userscripts.sharedUi.position`, `userscripts.sharedUi.activePanel`.
-- Use a capped logger writing to `LOG_STORAGE_KEY` (200 entries); prefer the existing scrubber pattern in scripts.
 - Observe idempotency: guard DOM injection with IDs/data-attributes; disconnect observers/timers on disable.
 - Avoid global side effects when disabled; re-run safely after SPA navigation.
 

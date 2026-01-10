@@ -27,7 +27,6 @@ Scripts use `LOAD PRIORITY` comments to document their intended load order:
 | 5 | document-start | dlcountdown.user.js | Early - hooks timer functions |
 | 6-8 | document-end | searchgoogle, vxdark, searchduck | Content enhancement |
 | 9-11 | document-idle | pagemd, chatgptmd, pageinfoexport | Document processing |
-| 12 | document-idle | userscriptlogs.user.js | Utilities - load last |
 
 **Important:** LOAD PRIORITY numbers are documentation only - actual load order is determined by `@run-at` timing and browser behavior.
 
@@ -44,7 +43,7 @@ Scripts use `LOAD PRIORITY` comments to document their intended load order:
 
 3. **document-idle** - Scripts run after page is fully loaded (default if omitted)
    - Safest for heavy operations
-   - Used for: userscriptui, pagemd, chatgptmd, pageinfoexport, userscriptlogs
+   - Used for: userscriptui, pagemd, chatgptmd, pageinfoexport
 
 ## Deferred Registration Pattern
 
@@ -245,5 +244,5 @@ Potential enhancements to load order handling:
 ## See Also
 
 - [AGENTS.md](../AGENTS.md) - Developer guidelines for userscripts
-- [API-doc.md](../API-doc.md) - API usage and best practices
+- [API-doc.md](./API-doc.md) - API usage and best practices
 - [CONCURRENCY.md](./CONCURRENCY.md) - Handling concurrent script execution

@@ -60,7 +60,7 @@ node --check dlcountdown.user.js antiadblock.user.js adinteract.user.js
 4. Check the scripts list in the modal
 
 **Expected:**
-- All 12 scripts appear in the list
+- All 11 scripts appear in the list
 - Each script shows ON/OFF status
 - Clicking a script name switches to its panel
 - Toggle buttons work (Enable/Disable)
@@ -155,7 +155,7 @@ node --check dlcountdown.user.js antiadblock.user.js adinteract.user.js
 **Purpose:** Verify no conflicts when all scripts run together.
 
 ### Steps:
-1. Enable all 12 userscripts
+1. Enable all 11 userscripts
 2. Navigate to a complex page (e.g., Google search results)
 3. Open shared UI modal
 4. Verify all scripts are listed
@@ -210,7 +210,6 @@ node --check dlcountdown.user.js antiadblock.user.js adinteract.user.js
 ### Steps:
 1. Uninstall all userscripts
 2. Install in reverse priority order:
-   - userscriptlogs.user.js (12)
    - pageinfoexport.user.js (11)
    - chatgptmd.user.js (10)
    - ... down to ...
@@ -225,7 +224,7 @@ node --check dlcountdown.user.js antiadblock.user.js adinteract.user.js
 
 **Then reverse:**
 1. Uninstall all again
-2. Install in priority order (1 → 12)
+2. Install in priority order (1 → 11)
 3. Test again
 
 **If failed:**
@@ -349,4 +348,4 @@ If any test fails, report the issue with:
 
 - [LOAD-ORDER.md](./LOAD-ORDER.md) - Load order and race condition documentation
 - [AGENTS.md](../AGENTS.md) - Developer guidelines
-- [API-doc.md](../API-doc.md) - API best practices
+- [API-doc.md](./API-doc.md) - API best practices

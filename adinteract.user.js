@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ad Interaction Gate Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.02.0412
+// @version      2026.01.10.0953
 // @description  Unlocks ad interaction gates after repeated clicks with optional auto-actions.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTMgM2w3LjA3IDE2Ljk3IDIuNTEtNy4zOSA3LjM5LTIuNTFMMyAzeiIvPjxwYXRoIGQ9Ik0xMyAxM2w2IDYiLz48L3N2Zz4=
@@ -51,8 +51,6 @@
 
     const DEBUG = false;
     const LOG_PREFIX = '[adint]';
-    const LOG_STORAGE_KEY = 'userscript.logs.adinteract';
-    const LOG_MAX_ENTRIES = 200;
     const logConfig = { debugMode: false, logLevel: 'info' };
     const SCRIPT_ID = 'adinteract';
     const SCRIPT_TITLE = 'Ad Interaction Unlock';
@@ -230,7 +228,7 @@
     };
     const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
-    const createLogger = ({ prefix, storageKey, maxEntries, debug }) => {
+    const createLogger = ({ prefix, debug }) => {
         let debugEnabled = !!debug;
         const SENSITIVE_KEY_RE = /pass(word)?|token|secret|auth|session|cookie|key/i;
         const scrubString = (value) => {
@@ -279,28 +277,14 @@
             }
             return value;
         };
-        const writeEntry = async (level, message, meta) => {
-            try {
-                const existing = await Promise.resolve(GM_getValue(storageKey, []));
-                const list = Array.isArray(existing) ? existing : [];
-                list.push({ ts: new Date().toISOString(), level, message, meta });
-                if (list.length > maxEntries) {
-                    list.splice(0, list.length - maxEntries);
-                }
-                await Promise.resolve(GM_setValue(storageKey, list));
-            } catch (_) {}
-        };
         const log = (level, message, meta) => {
-            if (level === 'debug' && !debugEnabled) return;
+            if ((level === 'debug' || level === 'info') && !debugEnabled) return;
             const msg = typeof message === 'string' ? scrubString(message) : 'event';
             const data = typeof message === 'string' ? meta : message;
             const sanitized = data === undefined ? undefined : scrubValue(data);
-            writeEntry(level, msg, sanitized).catch(() => {});
-            if (debugEnabled || level === 'warn' || level === 'error') {
-                const method = level === 'debug' ? 'log' : level;
-                const payload = sanitized === undefined ? [] : [sanitized];
-                console[method](prefix, msg, ...payload);
-            }
+            const method = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log';
+            const payload = sanitized === undefined ? [] : [sanitized];
+            console[method](prefix, msg, ...payload);
         };
         log.setDebug = (value) => { debugEnabled = !!value; };
         return log;
@@ -308,8 +292,6 @@
 
     const log = createLogger({
         prefix: LOG_PREFIX,
-        storageKey: LOG_STORAGE_KEY,
-        maxEntries: LOG_MAX_ENTRIES,
         debug: DEBUG
     });
 
