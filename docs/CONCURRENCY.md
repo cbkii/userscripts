@@ -4,7 +4,7 @@ This document provides a detailed analysis of concurrency issues when multiple u
 
 ## Overview
 
-When 12+ userscripts run concurrently on a single page, several categories of conflicts can occur:
+When 11+ userscripts run concurrently on a single page, several categories of conflicts can occur:
 
 1. **Race conditions** - Scripts depending on shared resources that may not be ready
 2. **Native API conflicts** - Multiple scripts patching the same browser APIs

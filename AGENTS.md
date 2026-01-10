@@ -494,7 +494,7 @@ Add new validation logic to `/dev/scripts/lint.js` or `/dev/scripts/test.js`.
 
 ### Concurrency & Load Order (Critical)
 
-- **[CONCURRENCY.md](./docs/CONCURRENCY.md)** — Detailed analysis of race conditions, API conflicts, and mitigation strategies when 12+ scripts run simultaneously
+- **[CONCURRENCY.md](./docs/CONCURRENCY.md)** — Detailed analysis of race conditions, API conflicts, and mitigation strategies when 11+ scripts run simultaneously
 - **[ANDROID-XBROWSER-FIXES-TECHNICAL.md](./docs/ANDROID-XBROWSER-FIXES-TECHNICAL.md)** — Technical details on polling fallback pattern, download fixes, and load order independence
 
 ### Testing & Validation

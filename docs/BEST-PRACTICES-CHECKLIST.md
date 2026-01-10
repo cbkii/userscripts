@@ -114,7 +114,7 @@ Quick reference for developers: ensure your userscripts meet industry standards.
 
 ## ✅ Load Order & Concurrency
 
-- [ ] Declares load priority in top comment (1-12)
+- [ ] Declares load priority in top comment (1-11)
 - [ ] Implements idempotency guard (`if (state.started) return`)
 - [ ] Doesn't pollute global namespace (except framework scripts)
 - [ ] Checks for existing patches before patching native APIs

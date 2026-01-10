@@ -710,4 +710,4 @@ The research into "exteragram plugins" revealed confusion (exteraGram is a Teleg
 **Researcher**: GitHub Copilot Agent  
 **Repositories Analyzed**: 15+ popular userscript repos  
 **Documentation Sources**: 8 official references  
-**Scripts Audited**: 12 userscripts in this repository
+**Scripts Audited**: 11 userscripts in this repository

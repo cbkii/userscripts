@@ -60,7 +60,7 @@ node --check dlcountdown.user.js antiadblock.user.js adinteract.user.js
 4. Check the scripts list in the modal
 
 **Expected:**
-- All 12 scripts appear in the list
+- All 11 scripts appear in the list
 - Each script shows ON/OFF status
 - Clicking a script name switches to its panel
 - Toggle buttons work (Enable/Disable)
@@ -155,7 +155,7 @@ node --check dlcountdown.user.js antiadblock.user.js adinteract.user.js
 **Purpose:** Verify no conflicts when all scripts run together.
 
 ### Steps:
-1. Enable all 12 userscripts
+1. Enable all 11 userscripts
 2. Navigate to a complex page (e.g., Google search results)
 3. Open shared UI modal
 4. Verify all scripts are listed
