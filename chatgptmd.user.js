@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.10.0820
+// @version      2026.01.10.0842
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions. UI integrated with shared userscript panel.
 // @author       cbcoz
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTIxIDE1djRhMiAyIDAgMCAxLTIgMkg1YTIgMiAwIDAgMS0yLTJ2LTQiLz48cG9seWxpbmUgcG9pbnRzPSI3IDEwIDEyIDE1IDE3IDEwIi8+PGxpbmUgeDE9IjEyIiB5MT0iMTUiIHgyPSIxMiIgeTI9IjMiLz48L3N2Zz4=
@@ -1425,7 +1425,13 @@
 
   const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onload = () => {
+      if (typeof reader.result !== 'string' || !reader.result) {
+        reject(new Error('Invalid data URL result'));
+        return;
+      }
+      resolve(reader.result);
+    };
     reader.onerror = () => reject(new Error('Failed to read blob as data URL'));
     reader.readAsDataURL(blob);
   });
