@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PGxpbmUgeDE9IjEyIiB5MT0iMTgiIHgyPSIxMiIgeTI9IjEyIi8+PHBvbHlsaW5lIHBvaW50cz0iOSAxNSAxMiAxOCAxNSAxNSIvPjwvc3ZnPg==
-// @version      2026.01.11.0215
+// @version      2026.01.11.0251
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -1090,6 +1090,9 @@
     let resolveLegacy = null;
     let resolveMobileFallback = null;
     let fallbackTriggered = false;
+    let fallbackAttempted = false;
+    let allowAutoFallback = true;
+    let lastError = null;
     const legacyCompletion = new Promise((resolve) => {
       resolveLegacy = resolve;
     });
@@ -1102,6 +1105,8 @@
       if (fallbackTriggered) return;
       fallbackTriggered = true;
       resource.markStale();
+      fallbackAttempted = true;
+      lastError = err;
       fallbackResult = await fallback(err);
       if (resolveLegacy) {
         resolveLegacy({ success: false });
@@ -1189,7 +1194,8 @@
             resolveMobileFallback({ success: false });
             resolveMobileFallback = null;
           }
-          void handleError(new Error('Mobile GM_download timeout'));
+          allowAutoFallback = false;
+          lastError = new Error('Mobile GM_download timeout');
         }, MOBILE_FALLBACK_DELAY_MS);
       }
       const downloadPromise = GMX.download(downloadDetails);
@@ -1232,14 +1238,44 @@
         success: fallbackResult?.success || false,
         method: fallbackResult?.method || 'gm-download',
         error: err,
+        fallbackAttempted,
+        allowAutoFallback,
       };
     }
 
     if (fallbackResult) {
-      return fallbackResult;
+      return { ...fallbackResult, fallbackAttempted: true };
     }
 
-    return { attempted: true, success: true, method: 'gm-download' };
+    if (fallbackAttempted) {
+      return {
+        attempted: true,
+        success: false,
+        method: 'gm-download',
+        error: lastError || new Error('GM_download fallback failed'),
+        fallbackAttempted,
+        allowAutoFallback,
+      };
+    }
+
+    if (lastError && !allowAutoFallback) {
+      return {
+        attempted: true,
+        success: false,
+        method: 'gm-download',
+        error: lastError,
+        fallbackAttempted,
+        allowAutoFallback,
+      };
+    }
+
+    return {
+      attempted: true,
+      success: true,
+      method: 'gm-download',
+      fallbackAttempted,
+      allowAutoFallback,
+    };
   }
 
   function saveWithAnchor(filename, resource) {
@@ -1327,6 +1363,10 @@
         return gmResult;
       }
       lastResult = gmResult;
+    }
+
+    if (gmResult.fallbackAttempted || gmResult.allowAutoFallback === false) {
+      return lastResult || { attempted: false, success: false, method: 'none' };
     }
 
     const fallbackResult = await doFallback();
