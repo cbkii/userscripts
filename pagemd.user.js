@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.11.0043
+// @version      2026.01.11.0215
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PHBhdGggZD0iTTEwIDEzaDQiLz48cGF0aCBkPSJNMTAgMTdoNCIvPjxwYXRoIGQ9Ik0xMCA5aDIiLz48L3N2Zz4=
@@ -535,7 +535,8 @@
   };
 
   const buildSharePreviewHtml = (text, filename) => {
-    const escaped = text
+    const hardened = text.replace(/<\/textarea>/gi, '</tex' + 'tarea>');
+    const escaped = hardened
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
@@ -579,13 +580,74 @@
     }
   };
 
+  const setClipboardSafe = async (text) => {
+    if (typeof GM_setClipboard === 'function') {
+      try {
+        GM_setClipboard(text, { type: 'text', mimetype: 'text/plain' });
+        return true;
+      } catch (_) {}
+      try {
+        GM_setClipboard(text, 'text');
+        return true;
+      } catch (_) {}
+      try {
+        GM_setClipboard(text);
+        return true;
+      } catch (_) {}
+    }
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const success = document.execCommand('copy');
+      textarea.remove();
+      return success;
+    } catch (_) {
+      return false;
+    }
+  };
+
   const shareFileOrFallback = async (textOrBlob, filename, mimeType) => {
     const isText = typeof textOrBlob === 'string';
-    const text = isText ? textOrBlob : '';
-    const blob = isText ? null : textOrBlob;
-    const file = isText
-      ? new File([text], filename, { type: `${mimeType};charset=utf-8` })
-      : new File([blob], filename, { type: mimeType || blob?.type || 'application/octet-stream' });
+    const blob = isText
+      ? new Blob([textOrBlob], { type: mimeType || 'text/plain;charset=utf-8' })
+      : textOrBlob;
+    let text = '';
+    if (isText) {
+      text = textOrBlob;
+    } else {
+      const type = (mimeType || blob.type || '').toLowerCase();
+      const looksTexty = type.startsWith('text/')
+        || type.includes('json')
+        || type.includes('xml')
+        || type.includes('markdown')
+        || type.includes('yaml')
+        || type.includes('csv')
+        || type === '';
+      if (looksTexty) {
+        try {
+          text = typeof blob.text === 'function'
+            ? await blob.text()
+            : await new Response(blob).text();
+        } catch (_) {
+          text = '';
+        }
+      }
+    }
+    const file = new File([blob], filename, {
+      type: blob.type || mimeType || 'application/octet-stream'
+    });
     try {
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: filename });
@@ -604,26 +666,9 @@
 
     let copied = false;
     if (text) {
-      try {
-        if (typeof GM_setClipboard === 'function') {
-          GM_setClipboard(text, { type: 'text', mimetype: 'text/plain' });
-          copied = true;
-        } else if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-          await navigator.clipboard.writeText(text);
-          copied = true;
-        } else {
-          const textarea = document.createElement('textarea');
-          textarea.value = text;
-          textarea.style.position = 'fixed';
-          textarea.style.opacity = '0';
-          document.body.appendChild(textarea);
-          textarea.select();
-          document.execCommand('copy');
-          textarea.remove();
-          copied = true;
-        }
-      } catch (err) {
-        logWarn('Clipboard fallback failed', { error: err?.message || String(err) });
+      copied = await setClipboardSafe(text);
+      if (!copied) {
+        logWarn('Clipboard fallback failed');
       }
     }
 
@@ -999,30 +1044,12 @@
       await wait(POST_IDLE_DELAY_MS);
       const { node, title } = extractMainContent({ aggressiveClutter: options.aggressiveClutter });
       const markdown = buildMarkdownDocument(node, title);
-      try {
-        if (typeof GM_setClipboard === 'function') {
-          GM_setClipboard(markdown, { type: 'text', mimetype: 'text/plain' });
-          notify(`✓ Copied to clipboard (${markdown.length} chars)`);
-          logInfo('Markdown copied to clipboard', { length: markdown.length });
-        } else {
-          // Fallback for browsers/managers without GM_setClipboard
-          if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-            await navigator.clipboard.writeText(markdown);
-          } else {
-            const textarea = document.createElement('textarea');
-            textarea.value = markdown;
-            textarea.style.position = 'fixed';
-            textarea.style.opacity = '0';
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand('copy');
-            textarea.remove();
-          }
-          notify(`✓ Copied to clipboard (${markdown.length} chars)`);
-          logInfo('Markdown copied to clipboard (fallback)', { length: markdown.length });
-        }
-      } catch (clipErr) {
-        logError('Clipboard copy failed', { error: clipErr?.message || String(clipErr) });
+      const copied = await setClipboardSafe(markdown);
+      if (copied) {
+        notify(`✓ Copied to clipboard (${markdown.length} chars)`);
+        logInfo('Markdown copied to clipboard', { length: markdown.length });
+      } else {
+        logError('Clipboard copy failed');
         notify('Clipboard copy failed. See console for details.');
       }
     } catch (err) {
@@ -1042,12 +1069,9 @@
       const markdown = buildMarkdownDocument(node, title);
       const filename = sanitizeFilename(title || document.title || DEFAULT_FILENAME);
       const downloadResult = await triggerDownload(markdown, filename);
-      try {
-        if (typeof GM_setClipboard === 'function') {
-          GM_setClipboard(markdown, { type: 'text', mimetype: 'text/plain' });
-        }
-      } catch (clipErr) {
-        logWarn('Clipboard copy failed', { error: clipErr?.message || String(clipErr) });
+      const copied = await setClipboardSafe(markdown);
+      if (!copied) {
+        logWarn('Clipboard copy failed');
       }
       if (IS_XBROWSER && downloadResult) {
         if (downloadResult.cancelled) {

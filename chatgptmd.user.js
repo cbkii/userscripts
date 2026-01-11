@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.11.0043
+// @version      2026.01.11.0215
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions. UI integrated with shared userscript panel.
 // @author       cbcoz
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTIxIDE1djRhMiAyIDAgMCAxLTIgMkg1YTIgMiAwIDAgMS0yLTJ2LTQiLz48cG9seWxpbmUgcG9pbnRzPSI3IDEwIDEyIDE1IDE3IDEwIi8+PGxpbmUgeDE9IjEyIiB5MT0iMTUiIHgyPSIxMiIgeTI9IjMiLz48L3N2Zz4=
@@ -1064,7 +1064,8 @@
   }
 
   function buildSharePreviewHtml(text, filename) {
-    const escaped = text
+    const hardened = text.replace(/<\/textarea>/gi, '</tex' + 'tarea>');
+    const escaped = hardened
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
@@ -1132,20 +1133,63 @@
     }
   }
 
-  async function shareFileOrFallback(text, filename, mimeType) {
-    const shareResult = await shareContent(text, filename, mimeType);
-    if (shareResult.ok || shareResult.cancelled) {
-      return shareResult;
+  async function shareFileOrFallback(textOrBlob, filename, mimeType) {
+    const isText = typeof textOrBlob === 'string';
+    const blob = isText
+      ? new Blob([textOrBlob], { type: mimeType || 'text/plain;charset=utf-8' })
+      : textOrBlob;
+    let text = '';
+    if (isText) {
+      text = textOrBlob;
+    } else {
+      const type = (mimeType || blob.type || '').toLowerCase();
+      const looksTexty = type.startsWith('text/')
+        || type.includes('json')
+        || type.includes('xml')
+        || type.includes('markdown')
+        || type.includes('yaml')
+        || type.includes('csv')
+        || type === '';
+      if (looksTexty) {
+        try {
+          text = typeof blob.text === 'function'
+            ? await blob.text()
+            : await new Response(blob).text();
+        } catch (_) {
+          text = '';
+        }
+      }
+    }
+    const file = new File([blob], filename, {
+      type: blob.type || mimeType || 'application/octet-stream'
+    });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ title: filename, files: [file] });
+        return { ok: true, method: 'share-file' };
+      }
+      if (navigator.share && text) {
+        await navigator.share({ title: filename, text });
+        return { ok: true, method: 'share-text' };
+      }
+    } catch (error) {
+      if (error && error.name === 'AbortError') {
+        return { ok: false, cancelled: true, method: 'share' };
+      }
+      log('error', 'Share failed', error);
     }
 
-    const copied = await copyToClipboard(text, {
-      silent: true,
-      message: '✅ Copied to clipboard.'
-    });
-    if (copied) {
-      alert('Copied to clipboard. XBrowser can’t save generated files directly; use Share or paste into a file.');
+    let copied = false;
+    if (text) {
+      copied = await copyToClipboard(text, {
+        silent: true,
+        message: '✅ Copied to clipboard.'
+      });
+      if (copied) {
+        alert('Copied to clipboard. XBrowser can’t save generated files directly; use Share or paste into a file.');
+      }
     }
-    const previewOpened = openSharePreviewTab(text, filename);
+    const previewOpened = text ? openSharePreviewTab(text, filename) : false;
     return {
       ok: copied || previewOpened,
       method: previewOpened ? 'preview' : copied ? 'clipboard' : 'none'

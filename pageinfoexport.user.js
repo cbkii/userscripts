@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PGxpbmUgeDE9IjEyIiB5MT0iMTgiIHgyPSIxMiIgeTI9IjEyIi8+PHBvbHlsaW5lIHBvaW50cz0iOSAxNSAxMiAxOCAxNSAxNSIvPjwvc3ZnPg==
-// @version      2026.01.11.0043
+// @version      2026.01.11.0215
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -930,7 +930,8 @@
   });
 
   const buildSharePreviewHtml = (text, filename) => {
-    const escaped = text
+    const hardened = text.replace(/<\/textarea>/gi, '</tex' + 'tarea>');
+    const escaped = hardened
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
@@ -976,11 +977,34 @@
 
   const shareFileOrFallback = async (textOrBlob, filename, mimeType) => {
     const isText = typeof textOrBlob === 'string';
-    const text = isText ? textOrBlob : '';
-    const blob = isText ? null : textOrBlob;
-    const file = isText
-      ? new File([text], filename, { type: `${mimeType};charset=utf-8` })
-      : new File([blob], filename, { type: mimeType || blob?.type || 'application/octet-stream' });
+    const blob = isText
+      ? new Blob([textOrBlob], { type: mimeType || 'text/plain;charset=utf-8' })
+      : textOrBlob;
+    let text = '';
+    if (isText) {
+      text = textOrBlob;
+    } else {
+      const type = (mimeType || blob.type || '').toLowerCase();
+      const looksTexty = type.startsWith('text/')
+        || type.includes('json')
+        || type.includes('xml')
+        || type.includes('markdown')
+        || type.includes('yaml')
+        || type.includes('csv')
+        || type === '';
+      if (looksTexty) {
+        try {
+          text = typeof blob.text === 'function'
+            ? await blob.text()
+            : await new Response(blob).text();
+        } catch (_) {
+          text = '';
+        }
+      }
+    }
+    const file = new File([blob], filename, {
+      type: blob.type || mimeType || 'application/octet-stream'
+    });
     try {
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: filename });
@@ -1000,6 +1024,9 @@
     let copied = false;
     if (text) {
       copied = await GMX.setClipboard(text);
+      if (!copied) {
+        log('warn', 'Clipboard fallback failed');
+      }
     }
     if (copied) {
       GMX.notification('Copied to clipboard. XBrowser can’t save generated files directly; use Share or paste into a file.');
