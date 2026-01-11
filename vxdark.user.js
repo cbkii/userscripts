@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Router Contrast Dark Mode
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.10.0953
+// @version      2026.01.11.1505
 // @description  High-contrast dark mode for the VX230V router UI.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTIxIDEyLjc5QTkgOSAwIDEgMSAxMS4yMSAzIDcgNyAwIDAgMCAyMSAxMi43OXoiLz48L3N2Zz4=
@@ -47,6 +47,9 @@
   const SCRIPT_ID = 'vxdark';
   const SCRIPT_TITLE = 'VX Router Dark Mode';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
+  const MEMORY_LIMIT_MB_DEFAULT = 200;
+  const MEMORY_LIMIT_KEY = `${SCRIPT_ID}.memoryLimitMb`;
+  const MEMORY_CHECK_INTERVAL_MS = 5000;
 
   //////////////////////////////////////////////////////////////
   // UTILITIES & HELPERS
@@ -195,7 +198,10 @@
     menuIds: [],
     observers: [],
     styleNode: null,
-    unloadHandler: null
+    unloadHandler: null,
+    memoryLimitMb: MEMORY_LIMIT_MB_DEFAULT,
+    memoryIntervalId: null,
+    memoryTripped: false
   };
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
@@ -266,12 +272,48 @@
     debug: DEBUG
   });
 
+  const getMemoryUsageMb = () => {
+    const mem = (typeof performance !== 'undefined' && performance && performance.memory) ? performance.memory : null;
+    if (!mem || typeof mem.usedJSHeapSize !== 'number') return null;
+    return mem.usedJSHeapSize / (1024 * 1024);
+  };
+
+  const stopForMemoryPressure = (usedMb) => {
+    if (state.memoryTripped) return;
+    state.memoryTripped = true;
+    if (state.memoryIntervalId) {
+      clearInterval(state.memoryIntervalId);
+      state.memoryIntervalId = null;
+    }
+    void setEnabled(false);
+    log('warn', `Memory limit exceeded (${usedMb.toFixed(1)} MB). Script disabled.`);
+  };
+
+  const startMemoryGuard = () => {
+    if (state.memoryIntervalId || !state.memoryLimitMb) return;
+    state.memoryIntervalId = setInterval(() => {
+      const usedMb = getMemoryUsageMb();
+      if (usedMb !== null && usedMb >= state.memoryLimitMb) {
+        stopForMemoryPressure(usedMb);
+      }
+    }, MEMORY_CHECK_INTERVAL_MS);
+  };
+
+  const setMemoryLimit = async (value) => {
+    const parsed = Number.parseFloat(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    state.memoryLimitMb = Math.max(50, Math.round(parsed));
+    await gmStore.set(MEMORY_LIMIT_KEY, state.memoryLimitMb);
+    registerMenu();
+  };
+
   //////////////////////////////////////////////////////////////
   // CORE LOGIC - DARK MODE STYLING
   //////////////////////////////////////////////////////////////
 
   async function main() {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
+    state.memoryLimitMb = await gmStore.get(MEMORY_LIMIT_KEY, MEMORY_LIMIT_MB_DEFAULT);
 
     const DARK_CSS = `
     html, body, top {
@@ -454,6 +496,7 @@
     const start = async () => {
       if (state.started) return;
       state.started = true;
+      startMemoryGuard();
       applyStyles();
       startObservers();
       attachUnload();
@@ -472,6 +515,13 @@
       state.menuIds.push(GM_registerMenuCommand(
         `[Dark Theme] ${state.enabled ? '✓' : '✗'} Enable`,
         async () => { await setEnabled(!state.enabled); }
+      ));
+      state.menuIds.push(GM_registerMenuCommand(
+        `[Dark Theme] 🧠 Memory limit (${state.memoryLimitMb} MB)`,
+        () => {
+          const next = prompt('Set memory limit in MB (minimum 50):', String(state.memoryLimitMb));
+          if (next !== null) setMemoryLimit(next);
+        }
       ));
     };
 
@@ -517,6 +567,29 @@
       toggleBtn.style.fontSize = '13px';
       toggleBtn.addEventListener('click', () => setEnabled(!state.enabled));
       wrapper.appendChild(toggleBtn);
+
+      const memoryNote = document.createElement('p');
+      memoryNote.textContent = `Memory guard limit: ${state.memoryLimitMb} MB`;
+      memoryNote.style.margin = '6px 0 0 0';
+      memoryNote.style.fontSize = '12px';
+      memoryNote.style.color = '#94a3b8';
+      wrapper.appendChild(memoryNote);
+
+      const memoryBtn = document.createElement('button');
+      memoryBtn.type = 'button';
+      memoryBtn.textContent = 'Set memory limit';
+      memoryBtn.style.padding = '8px 12px';
+      memoryBtn.style.borderRadius = '6px';
+      memoryBtn.style.border = '1px solid rgba(255,255,255,0.18)';
+      memoryBtn.style.background = '#1f2937';
+      memoryBtn.style.color = '#f8fafc';
+      memoryBtn.style.cursor = 'pointer';
+      memoryBtn.style.fontSize = '13px';
+      memoryBtn.addEventListener('click', () => {
+        const next = prompt('Set memory limit in MB (minimum 50):', String(state.memoryLimitMb));
+        if (next !== null) setMemoryLimit(next);
+      });
+      wrapper.appendChild(memoryBtn);
 
       return wrapper;
     };

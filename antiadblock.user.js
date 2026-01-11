@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Anti-AdBlock Detection
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.10.0953
+// @version      2026.01.11.1505
 // @description  Mitigates anti-adblock overlays using rule lists and profiles.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDIyczgtNCA4LTEwVjVsLTgtMy04IDN2N2MwIDYgOCAxMCA4IDEweiIvPjwvc3ZnPg==
@@ -61,6 +61,9 @@
   const SCRIPT_TITLE = 'Anti-AdBlock Neutralizer';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
   const ALWAYS_RUN_KEY = `${SCRIPT_ID}.alwaysRun`;
+  const MEMORY_LIMIT_MB_DEFAULT = 200;
+  const MEMORY_LIMIT_KEY = `${SCRIPT_ID}.memoryLimitMb`;
+  const MEMORY_CHECK_INTERVAL_MS = 5000;
 
   //////////////////////////////////////////////////////////////
   // UTILITIES & HELPERS
@@ -225,6 +228,9 @@
     started: false,
     alwaysRun: false,
     menuIds: [],
+    memoryLimitMb: MEMORY_LIMIT_MB_DEFAULT,
+    memoryIntervalId: null,
+    memoryTripped: false,
     // Resource tracking for cleanup
     resources: {
       intervals: [],
@@ -300,6 +306,42 @@
     prefix: LOG_PREFIX,
     debug: DEBUG
   });
+
+  const getMemoryUsageMb = () => {
+    const mem = (typeof performance !== 'undefined' && performance && performance.memory) ? performance.memory : null;
+    if (!mem || typeof mem.usedJSHeapSize !== 'number') return null;
+    return mem.usedJSHeapSize / (1024 * 1024);
+  };
+
+  const stopForMemoryPressure = (usedMb) => {
+    if (state.memoryTripped) return;
+    state.memoryTripped = true;
+    if (state.memoryIntervalId) {
+      clearInterval(state.memoryIntervalId);
+      state.memoryIntervalId = null;
+    }
+    void setEnabled(false);
+    stop();
+    log('warn', `Memory limit exceeded (${usedMb.toFixed(1)} MB). Script disabled.`);
+  };
+
+  const startMemoryGuard = () => {
+    if (state.memoryIntervalId || !state.memoryLimitMb) return;
+    state.memoryIntervalId = setInterval(() => {
+      const usedMb = getMemoryUsageMb();
+      if (usedMb !== null && usedMb >= state.memoryLimitMb) {
+        stopForMemoryPressure(usedMb);
+      }
+    }, MEMORY_CHECK_INTERVAL_MS);
+  };
+
+  const setMemoryLimit = async (value) => {
+    const parsed = Number.parseFloat(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    state.memoryLimitMb = Math.max(50, Math.round(parsed));
+    await gmStore.set(MEMORY_LIMIT_KEY, state.memoryLimitMb);
+    registerMenu();
+  };
   const dbg = (...args) => log('debug', ...args);
 
   //////////////////////////////////////////////////////////////
@@ -2149,6 +2191,29 @@
     
     wrapper.appendChild(actionsRow);
 
+    const memoryNote = document.createElement('p');
+    memoryNote.textContent = `Memory guard limit: ${state.memoryLimitMb} MB`;
+    memoryNote.style.margin = '6px 0 0 0';
+    memoryNote.style.fontSize = '12px';
+    memoryNote.style.color = '#94a3b8';
+    wrapper.appendChild(memoryNote);
+
+    const memoryBtn = document.createElement('button');
+    memoryBtn.type = 'button';
+    memoryBtn.textContent = 'Set memory limit';
+    memoryBtn.style.padding = '8px 12px';
+    memoryBtn.style.borderRadius = '6px';
+    memoryBtn.style.border = '1px solid rgba(255,255,255,0.18)';
+    memoryBtn.style.background = '#1f2937';
+    memoryBtn.style.color = '#f8fafc';
+    memoryBtn.style.cursor = 'pointer';
+    memoryBtn.style.fontSize = '13px';
+    memoryBtn.addEventListener('click', () => {
+      const next = prompt('Set memory limit in MB (minimum 50):', String(state.memoryLimitMb));
+      if (next !== null) setMemoryLimit(next);
+    });
+    wrapper.appendChild(memoryBtn);
+
     return wrapper;
   };
 
@@ -2168,6 +2233,13 @@
     state.menuIds.push(GM_registerMenuCommand(
       `[Anti-Adblock] ↻ Always Run (${state.alwaysRun ? 'ON' : 'OFF'})`,
       async () => { await setAlwaysRun(!state.alwaysRun); }
+    ));
+    state.menuIds.push(GM_registerMenuCommand(
+      `[Anti-Adblock] 🧠 Memory limit (${state.memoryLimitMb} MB)`,
+      () => {
+        const next = prompt('Set memory limit in MB (minimum 50):', String(state.memoryLimitMb));
+        if (next !== null) setMemoryLimit(next);
+      }
     ));
     if (state.enabled) {
       state.menuIds.push(GM_registerMenuCommand('[Anti-Adblock] ▶ Run fixes now', () => start()));
@@ -2205,6 +2277,7 @@
   const start = async () => {
     if (state.started) return;
     state.started = true;
+    startMemoryGuard();
     main();
   };
 
@@ -2228,6 +2301,7 @@
   const init = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
     state.alwaysRun = await gmStore.get(ALWAYS_RUN_KEY, false);
+    state.memoryLimitMb = await gmStore.get(MEMORY_LIMIT_KEY, MEMORY_LIMIT_MB_DEFAULT);
     
     // Try registration now that state/renderPanel/setEnabled are defined
     if (pendingRegistration && typeof pendingRegistration === 'function') {

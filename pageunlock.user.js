@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Page Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.30.0146
+// @version      2026.01.11.1505
 // @description  Unlock text selection, copy/paste, and context menu on restrictive sites. Optional overlay buster + aggressive mode. Lightweight + SPA-friendly.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHJlY3QgeD0iMyIgeT0iMTEiIHdpZHRoPSIxOCIgaGVpZ2h0PSIxMSIgcng9IjIiIHJ5PSIyIi8+PHBhdGggZD0iTTcgMTFWN2E1IDUgMCAwIDEgOS45LTEiLz48L3N2Zz4=
@@ -55,6 +55,9 @@
   const SCRIPT_TITLE = 'Page Unlocker';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
   const ALWAYS_RUN_KEY = `${SCRIPT_ID}.alwaysRun`;
+  const MEMORY_LIMIT_MB_DEFAULT = 200;
+  const MEMORY_LIMIT_KEY = `${SCRIPT_ID}.memoryLimitMb`;
+  const MEMORY_CHECK_INTERVAL_MS = 5000;
 
   const DEBUG = false;
   const LOG_PREFIX = '[pgunlock]';
@@ -69,6 +72,7 @@
     disabledHosts: [],          // per-host disable list
     hotkey: { alt: true, shift: true, code: 'KeyU' }, // Alt+Shift+U
     alwaysRun: false,           // dormant by default: only run automatically when enabled
+    memoryLimitMb: MEMORY_LIMIT_MB_DEFAULT,
   };
 
   //////////////////////////////////////////////////////////////
@@ -110,6 +114,8 @@
   const state = {
     menuIds: [],
     observers: [], // Track MutationObservers for cleanup
+    memoryIntervalId: null,
+    memoryTripped: false,
   };
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
   const MENU_PREFIX = '[Unlock]';
@@ -297,6 +303,14 @@
     location.reload();
   }
 
+  function setMemoryLimit(next) {
+    const parsed = Number.parseFloat(next);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    cfg.memoryLimitMb = Math.max(50, Math.round(parsed));
+    gmSet(STORAGE_KEY, cfg);
+    registerMenu();
+  }
+
   function toggleSite(enable) {
     const nextEnabled = typeof enable === 'boolean' ? enable : isHostDisabled;
     const set = new Set(cfg.disabledHosts);
@@ -400,6 +414,13 @@
       `${MENU_PREFIX} 🗑 Reset settings`,
       () => resetSettings()
     ));
+    state.menuIds.push(GM_registerMenuCommand(
+      `${MENU_PREFIX} 🧠 Memory limit (${cfg.memoryLimitMb} MB)`,
+      () => {
+        const next = prompt('Set memory limit in MB (minimum 50):', String(cfg.memoryLimitMb));
+        if (next !== null) setMemoryLimit(next);
+      }
+    ));
   }
 
   function renderPanel() {
@@ -454,6 +475,14 @@
     panel.appendChild(createToggle('🧹 Overlay buster (remove blockers)', cfg.overlayBuster, (val) => toggleOverlayBuster(val)));
     panel.appendChild(createToggle('✂️ Copy tail cleaner (strip attribution)', cfg.cleanCopyTail, (val) => toggleCopyTail(val)));
     panel.appendChild(createToggle('⌨️ Key event stopper (intercepts keys)', cfg.interceptKeys, (val) => toggleInterceptKeys(val)));
+    const memoryNote = document.createElement('p');
+    memoryNote.textContent = `Memory guard limit: ${cfg.memoryLimitMb} MB`;
+    memoryNote.style.cssText = 'margin: 10px 0 6px 0; font-size: 12px; color: #94a3b8;';
+    panel.appendChild(memoryNote);
+    panel.appendChild(createButton('🧠 Set memory limit', () => {
+      const next = prompt('Set memory limit in MB (minimum 50):', String(cfg.memoryLimitMb));
+      if (next !== null) setMemoryLimit(next);
+    }));
     const sep = document.createElement('hr');
     sep.style.cssText = 'border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 14px 0;';
     panel.appendChild(sep);
@@ -471,6 +500,33 @@
   // Always return early if globally/site disabled, but keep menu available.
   // Dormant by default: only run automatically if Always Run is enabled
   if (!cfg.enabled || isHostDisabled || !cfg.alwaysRun) return;
+
+  function getMemoryUsageMb() {
+    const mem = (typeof performance !== 'undefined' && performance && performance.memory) ? performance.memory : null;
+    if (!mem || typeof mem.usedJSHeapSize !== 'number') return null;
+    return mem.usedJSHeapSize / (1024 * 1024);
+  }
+
+  function stopForMemoryPressure(usedMb) {
+    if (state.memoryTripped) return;
+    state.memoryTripped = true;
+    cfg.enabled = false;
+    gmSet(STORAGE_KEY, cfg);
+    registerMenu();
+    disconnectObservers();
+    try { gmNotify(`Page Unlocker disabled: memory ${usedMb.toFixed(1)} MB exceeded limit.`); } catch (_) {}
+    try { location.reload(); } catch (_) {}
+  }
+
+  function startMemoryGuard() {
+    if (state.memoryIntervalId || !cfg.memoryLimitMb) return;
+    state.memoryIntervalId = setInterval(() => {
+      const usedMb = getMemoryUsageMb();
+      if (usedMb !== null && usedMb >= cfg.memoryLimitMb) {
+        stopForMemoryPressure(usedMb);
+      }
+    }, MEMORY_CHECK_INTERVAL_MS);
+  }
 
   // --- Core behaviour ---
   const EVENT_BASE = [
@@ -508,6 +564,7 @@
   `;
 
   let styleEl = null;
+  let styleEnsureScheduled = false;
 
   function ensureStyleLast() {
     try {
@@ -519,8 +576,29 @@
         styleEl.textContent = UNLOCK_CSS;
       }
       const parent = document.head || document.documentElement;
-      if (parent) parent.appendChild(styleEl); // appendChild moves existing node to the end
+      if (!parent) return;
+      if (styleEl.parentNode !== parent) {
+        parent.appendChild(styleEl);
+        return;
+      }
+      if (parent.lastElementChild !== styleEl) {
+        parent.appendChild(styleEl);
+      }
     } catch (_) {}
+  }
+
+  function scheduleEnsureStyleLast() {
+    if (styleEnsureScheduled) return;
+    styleEnsureScheduled = true;
+    const trigger = () => {
+      styleEnsureScheduled = false;
+      ensureStyleLast();
+    };
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(trigger);
+    } else {
+      setTimeout(trigger, 0);
+    }
   }
 
   function clearTopLevelDom0Handlers() {
@@ -765,7 +843,7 @@
   // --- Observers ---
   function installObservers() {
     // 1) Keep our style last if the site injects later CSS.
-    const headWatcher = new MutationObserver(() => ensureStyleLast());
+    const headWatcher = new MutationObserver(() => scheduleEnsureStyleLast());
 
     const attachHeadWatcher = () => {
       const head = document.head;
@@ -824,12 +902,33 @@
 
     // 3) Overlay buster for new nodes (cheap incremental scan).
     if (cfg.overlayBuster) {
+      const overlayQueue = new Set();
+      let overlayScanScheduled = false;
+      const flushOverlayQueue = () => {
+        overlayScanScheduled = false;
+        if (!overlayQueue.size) return;
+        const nodes = Array.from(overlayQueue);
+        overlayQueue.clear();
+        for (const node of nodes) {
+          scanNodeForOverlays(node);
+        }
+      };
+      const scheduleOverlayScan = () => {
+        if (overlayScanScheduled) return;
+        overlayScanScheduled = true;
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(flushOverlayQueue);
+        } else {
+          setTimeout(flushOverlayQueue, 16);
+        }
+      };
       const overlayWatcher = new MutationObserver((muts) => {
         for (const m of muts) {
           for (const n of m.addedNodes || []) {
-            scanNodeForOverlays(n);
+            overlayQueue.add(n);
           }
         }
+        scheduleOverlayScan();
       });
 
       // Attach when body exists.
@@ -886,4 +985,5 @@
   installObservers();
   hookHistory();
   installHotkey();
+  startMemoryGuard();
 })();
