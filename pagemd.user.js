@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.10.0953
+// @version      2026.01.11.0043
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PHBhdGggZD0iTTEwIDEzaDQiLz48cGF0aCBkPSJNMTAgMTdoNCIvPjxwYXRoIGQ9Ik0xMCA5aDIiLz48L3N2Zz4=
@@ -19,6 +19,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_download
+// @grant        GM_info
 // @require      https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/Readability.js
 // @require      https://unpkg.com/turndown@7.2.2/dist/turndown.js
 // @require      https://unpkg.com/turndown-plugin-gfm@1.0.2/dist/turndown-plugin-gfm.js
@@ -433,10 +434,25 @@
     : null;
   const isMobileBrowser = typeof navigator !== 'undefined'
     && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+  const scriptHandler = (typeof GM_info !== 'undefined' && GM_info && GM_info.scriptHandler)
+    || (typeof GM !== 'undefined' && GM?.info?.scriptHandler)
+    || '';
+  const isXBrowserScriptManager = /xbrowser|x\s*browser|x浏览器/i.test(String(scriptHandler));
+  const isXBrowserUA = /xbrowser|x\s*browser/i.test(navigator.userAgent || '');
+  const IS_XBROWSER = isXBrowserScriptManager || isXBrowserUA;
   const DOWNLOAD_ANCHOR_DELAY_MS = 500;
   const MOBILE_FALLBACK_DELAY_MS = 1200;
   const BLOB_STALE_MS = 10000;
   const BLOB_REVOKE_MS = 120000;
+
+  const isHttpUrl = (url) => {
+    try {
+      const protocol = new URL(url, location.href).protocol;
+      return protocol === 'http:' || protocol === 'https:';
+    } catch (_) {
+      return false;
+    }
+  };
 
   const createDownloadResource = (text, mime) => {
     const state = {
@@ -515,6 +531,109 @@
           }
         }, delayMs);
       },
+    };
+  };
+
+  const buildSharePreviewHtml = (text, filename) => {
+    const escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    const safeName = filename ? ` for ${filename}` : '';
+    return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Markdown Export Preview</title>
+<style>
+  body { font-family: system-ui, sans-serif; padding: 16px; }
+  textarea { width: 100%; min-height: 60vh; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .hint { margin: 12px 0; font-size: 13px; color: #475569; }
+</style>
+</head>
+<body>
+<h1>Markdown Export Preview</h1>
+<p class="hint">XBrowser cannot save generated files directly. Use Share, or copy/paste this text into a file editor${safeName}.</p>
+<textarea>${escaped}</textarea>
+</body>
+</html>`;
+  };
+
+  const openSharePreviewTab = (text, filename) => {
+    try {
+      const html = buildSharePreviewHtml(text, filename);
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch (_) {
+          // no-op
+        }
+      }, 30000);
+      return true;
+    } catch (err) {
+      logWarn('Preview tab failed', { error: err?.message || String(err) });
+      return false;
+    }
+  };
+
+  const shareFileOrFallback = async (textOrBlob, filename, mimeType) => {
+    const isText = typeof textOrBlob === 'string';
+    const text = isText ? textOrBlob : '';
+    const blob = isText ? null : textOrBlob;
+    const file = isText
+      ? new File([text], filename, { type: `${mimeType};charset=utf-8` })
+      : new File([blob], filename, { type: mimeType || blob?.type || 'application/octet-stream' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: filename });
+        return { ok: true, method: 'share-file' };
+      }
+      if (navigator.share && text) {
+        await navigator.share({ text, title: filename });
+        return { ok: true, method: 'share-text' };
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') {
+        return { ok: false, cancelled: true, method: 'share' };
+      }
+      logWarn('Share failed', { error: err?.message || String(err) });
+    }
+
+    let copied = false;
+    if (text) {
+      try {
+        if (typeof GM_setClipboard === 'function') {
+          GM_setClipboard(text, { type: 'text', mimetype: 'text/plain' });
+          copied = true;
+        } else if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          await navigator.clipboard.writeText(text);
+          copied = true;
+        } else {
+          const textarea = document.createElement('textarea');
+          textarea.value = text;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          textarea.remove();
+          copied = true;
+        }
+      } catch (err) {
+        logWarn('Clipboard fallback failed', { error: err?.message || String(err) });
+      }
+    }
+
+    if (copied) {
+      notify('Copied to clipboard. XBrowser can’t save generated files directly; use Share or paste into a file.');
+    }
+    const previewOpened = text ? openSharePreviewTab(text, filename) : false;
+    return {
+      ok: copied || previewOpened,
+      method: previewOpened ? 'preview' : copied ? 'clipboard' : 'none',
     };
   };
 
@@ -620,11 +739,16 @@
       fallback(err);
     };
 
+    if (IS_XBROWSER && !isHttpUrl(downloadUrl)) {
+      return false;
+    }
+
     const detail = {
       url: downloadUrl,
       name: filename,
       saveAs: false,
       ...(isMobileBrowser ? { confirm: false } : {}),
+      ...(IS_XBROWSER ? { confirm: true } : {}),
       onload: () => {
         if (fallbackTriggered) return;
         clearFallbackTimer();
@@ -672,6 +796,9 @@
   const triggerDownload = async (markdown, filename) => {
     const resource = createDownloadResource(markdown, 'text/markdown;charset=utf-8');
     const safeName = filename || DEFAULT_FILENAME;
+    if (IS_XBROWSER) {
+      return shareFileOrFallback(markdown, safeName, 'text/markdown');
+    }
     const fallback = () => {
       if (downloadViaAnchor(resource, safeName)) return;
       downloadViaDataUrl(resource, safeName);
@@ -680,6 +807,7 @@
     if (!gmSuccess) {
       fallback();
     }
+    return { ok: true, method: 'download' };
   };
 
   //////////////////////////////////////////////////////////////
@@ -913,7 +1041,7 @@
       const { node, title } = extractMainContent({ aggressiveClutter: options.aggressiveClutter });
       const markdown = buildMarkdownDocument(node, title);
       const filename = sanitizeFilename(title || document.title || DEFAULT_FILENAME);
-      await triggerDownload(markdown, filename);
+      const downloadResult = await triggerDownload(markdown, filename);
       try {
         if (typeof GM_setClipboard === 'function') {
           GM_setClipboard(markdown, { type: 'text', mimetype: 'text/plain' });
@@ -921,7 +1049,25 @@
       } catch (clipErr) {
         logWarn('Clipboard copy failed', { error: clipErr?.message || String(clipErr) });
       }
-      notify(`Markdown saved${markdown.length ? ` (${markdown.length} chars)` : ''}`);
+      if (IS_XBROWSER && downloadResult) {
+        if (downloadResult.cancelled) {
+          notify('Share cancelled.');
+          return;
+        }
+        if (downloadResult.method === 'share-file') {
+          notify('Share sheet opened. Use "Save" to store the file.');
+        } else if (downloadResult.method === 'share-text') {
+          notify('Share sheet opened with text.');
+        } else if (downloadResult.method === 'preview') {
+          notify('Opened preview tab for manual saving.');
+        } else if (downloadResult.method === 'clipboard') {
+          // Clipboard message already shown in share fallback.
+        } else {
+          notify('Markdown ready.');
+        }
+      } else {
+        notify(`Markdown saved${markdown.length ? ` (${markdown.length} chars)` : ''}`);
+      }
       logInfo('Conversion complete', { filename, length: markdown.length });
     } catch (err) {
       logError('Conversion failed', { error: err?.message || String(err) });

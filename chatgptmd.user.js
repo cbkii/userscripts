@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.10.0953
+// @version      2026.01.11.0043
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions. UI integrated with shared userscript panel.
 // @author       cbcoz
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTIxIDE1djRhMiAyIDAgMCAxLTIgMkg1YTIgMiAwIDAgMS0yLTJ2LTQiLz48cG9seWxpbmUgcG9pbnRzPSI3IDEwIDEyIDE1IDE3IDEwIi8+PGxpbmUgeDE9IjEyIiB5MT0iMTUiIHgyPSIxMiIgeTI9IjMiLz48L3N2Zz4=
@@ -19,6 +19,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_download
+// @grant        GM_info
 // ==/UserScript==
 
 /*
@@ -70,6 +71,12 @@
     : null;
   const isMobileBrowser = typeof navigator !== 'undefined'
     && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+  const scriptHandler = (typeof GM_info !== 'undefined' && GM_info && GM_info.scriptHandler)
+    || (typeof GM !== 'undefined' && GM?.info?.scriptHandler)
+    || '';
+  const isXBrowserScriptManager = /xbrowser|x\s*browser|x浏览器/i.test(String(scriptHandler));
+  const isXBrowserUA = /xbrowser|x\s*browser/i.test(navigator.userAgent || '');
+  const IS_XBROWSER = isXBrowserScriptManager || isXBrowserUA;
   const DOWNLOAD_ANCHOR_DELAY_MS = 500;
   const MOBILE_FALLBACK_DELAY_MS = 1200;
   const BLOB_STALE_MS = 10000;
@@ -492,6 +499,13 @@
 
     const { content, filename, mimeType } = exportData;
     if (action === 'download') {
+      if (IS_XBROWSER) {
+        const shareResult = await shareFileOrFallback(content, filename, mimeType);
+        if (shareResult.cancelled) {
+          alert('Share cancelled.');
+        }
+        return;
+      }
       await mobileDownload(content, filename, mimeType);
     } else if (action === 'copy') {
       await copyToClipboard(content);
@@ -1016,7 +1030,7 @@
     return match ? match[1] : null;
   }
 
-  async function copyToClipboard(text) {
+  async function copyToClipboard(text, options = {}) {
     try {
       if (typeof GM_setClipboard === 'function') {
         GM_setClipboard(text);
@@ -1025,11 +1039,15 @@
       } else {
         fallbackCopy(text);
       }
-      alert('✅ Copied to clipboard.');
+      if (!options.silent) {
+        alert(options.message || '✅ Copied to clipboard.');
+      }
       return true;
     } catch (error) {
       log('error', 'Clipboard copy failed', error);
-      alert('❗ Unable to copy to clipboard.');
+      if (!options.silent) {
+        alert('❗ Unable to copy to clipboard.');
+      }
       return false;
     }
   }
@@ -1045,25 +1063,93 @@
     textarea.remove();
   }
 
+  function buildSharePreviewHtml(text, filename) {
+    const escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    const safeName = filename ? ` for ${filename}` : '';
+    return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Chat Export Preview</title>
+<style>
+  body { font-family: system-ui, sans-serif; padding: 16px; }
+  textarea { width: 100%; min-height: 60vh; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .hint { margin: 12px 0; font-size: 13px; color: #475569; }
+</style>
+</head>
+<body>
+<h1>Chat Export Preview</h1>
+<p class="hint">XBrowser cannot save generated files directly. Use Share, or copy/paste this text into a file editor${safeName}.</p>
+<textarea>${escaped}</textarea>
+</body>
+</html>`;
+  }
+
+  function openSharePreviewTab(text, filename) {
+    try {
+      const html = buildSharePreviewHtml(text, filename);
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch (_) {
+          // no-op
+        }
+      }, 30000);
+      return true;
+    } catch (error) {
+      log('error', 'Preview open failed', error);
+      return false;
+    }
+  }
+
   async function shareContent(text, filename, mimeType) {
     if (!navigator.share) {
       alert('❗ Share is not supported on this device.');
-      return false;
+      return { ok: false, method: 'share' };
     }
 
     try {
       const file = new File([text], filename, { type: `${mimeType};charset=utf-8` });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ title: filename, files: [file] });
-      } else {
-        await navigator.share({ title: filename, text });
+        return { ok: true, method: 'share-file' };
       }
-      return true;
+      await navigator.share({ title: filename, text });
+      return { ok: true, method: 'share-text' };
     } catch (error) {
+      if (error && error.name === 'AbortError') {
+        return { ok: false, cancelled: true, method: 'share' };
+      }
       log('error', 'Share failed', error);
       alert('❗ Share failed.');
-      return false;
+      return { ok: false, method: 'share', error };
     }
+  }
+
+  async function shareFileOrFallback(text, filename, mimeType) {
+    const shareResult = await shareContent(text, filename, mimeType);
+    if (shareResult.ok || shareResult.cancelled) {
+      return shareResult;
+    }
+
+    const copied = await copyToClipboard(text, {
+      silent: true,
+      message: '✅ Copied to clipboard.'
+    });
+    if (copied) {
+      alert('Copied to clipboard. XBrowser can’t save generated files directly; use Share or paste into a file.');
+    }
+    const previewOpened = openSharePreviewTab(text, filename);
+    return {
+      ok: copied || previewOpened,
+      method: previewOpened ? 'preview' : copied ? 'clipboard' : 'none'
+    };
   }
 
   class MarkdownConverter {
@@ -1419,6 +1505,9 @@
   });
 
   async function mobileDownload(content, filename, mimeType = 'text/plain') {
+    if (IS_XBROWSER) {
+      return false;
+    }
     const resource = createDownloadResource(content, `${mimeType};charset=utf-8`);
     const fallback = () => {
       if (!anchorDownload(resource, filename)) {

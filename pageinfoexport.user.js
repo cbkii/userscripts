@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PGxpbmUgeDE9IjEyIiB5MT0iMTgiIHgyPSIxMiIgeTI9IjEyIi8+PHBvbHlsaW5lIHBvaW50cz0iOSAxNSAxMiAxOCAxNSAxNSIvPjwvc3ZnPg==
-// @version      2026.01.10.0953
+// @version      2026.01.11.0043
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -389,6 +389,23 @@
       },
     };
   })();
+
+  const scriptHandler = (typeof GM_info !== 'undefined' && GM_info && GM_info.scriptHandler)
+    || (typeof GM !== 'undefined' && GM?.info?.scriptHandler)
+    || GMX.info()?.scriptHandler
+    || '';
+  const isXBrowserScriptManager = /xbrowser|x\s*browser|x浏览器/i.test(String(scriptHandler));
+  const isXBrowserUA = /xbrowser|x\s*browser/i.test(navigator.userAgent || '');
+  const IS_XBROWSER = isXBrowserScriptManager || isXBrowserUA;
+
+  const isHttpUrl = (url) => {
+    try {
+      const protocol = new URL(url, location.href).protocol;
+      return protocol === 'http:' || protocol === 'https:';
+    } catch (_) {
+      return false;
+    }
+  };
 
   const log = createLogger({
     prefix: LOG_PREFIX,
@@ -912,6 +929,102 @@
     reader.readAsDataURL(blob);
   });
 
+  const buildSharePreviewHtml = (text, filename) => {
+    const escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    const safeName = filename ? ` for ${filename}` : '';
+    return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Page Info Export Preview</title>
+<style>
+  body { font-family: system-ui, sans-serif; padding: 16px; }
+  textarea { width: 100%; min-height: 60vh; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .hint { margin: 12px 0; font-size: 13px; color: #475569; }
+</style>
+</head>
+<body>
+<h1>Page Info Export Preview</h1>
+<p class="hint">XBrowser cannot save generated files directly. Use Share, or copy/paste this text into a file editor${safeName}.</p>
+<textarea>${escaped}</textarea>
+</body>
+</html>`;
+  };
+
+  const openSharePreviewTab = (text, filename) => {
+    try {
+      const html = buildSharePreviewHtml(text, filename);
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      GMX.openInTab(url, { background: false });
+      setTimeout(() => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch (_) {
+          // no-op
+        }
+      }, 30000);
+      return true;
+    } catch (err) {
+      log('warn', 'Preview tab failed', { error: err?.message || String(err) });
+      return false;
+    }
+  };
+
+  const shareFileOrFallback = async (textOrBlob, filename, mimeType) => {
+    const isText = typeof textOrBlob === 'string';
+    const text = isText ? textOrBlob : '';
+    const blob = isText ? null : textOrBlob;
+    const file = isText
+      ? new File([text], filename, { type: `${mimeType};charset=utf-8` })
+      : new File([blob], filename, { type: mimeType || blob?.type || 'application/octet-stream' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: filename });
+        return { ok: true, method: 'share-file' };
+      }
+      if (navigator.share && text) {
+        await navigator.share({ text, title: filename });
+        return { ok: true, method: 'share-text' };
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') {
+        return { ok: false, cancelled: true, method: 'share' };
+      }
+      log('warn', 'Share failed', { error: err?.message || String(err) });
+    }
+
+    let copied = false;
+    if (text) {
+      copied = await GMX.setClipboard(text);
+    }
+    if (copied) {
+      GMX.notification('Copied to clipboard. XBrowser can’t save generated files directly; use Share or paste into a file.');
+    }
+    const previewOpened = text ? openSharePreviewTab(text, filename) : false;
+    return {
+      ok: copied || previewOpened,
+      method: previewOpened ? 'preview' : copied ? 'clipboard' : 'none',
+    };
+  };
+
+  async function saveWithShare(filename, text, mime) {
+    if (!IS_XBROWSER) {
+      return { attempted: false };
+    }
+    const result = await shareFileOrFallback(text, filename, mime);
+    return {
+      attempted: true,
+      success: !!result.ok,
+      method: result.method || 'share',
+      cancelled: result.cancelled,
+      error: result.error,
+    };
+  }
+
   async function saveWithFilePicker(filename, resource, mime) {
     if (!window.showSaveFilePicker) {
       return { attempted: false };
@@ -995,6 +1108,15 @@
       // Use blob URL if any error occurs
     }
 
+    if (IS_XBROWSER && !isHttpUrl(downloadUrl)) {
+      return {
+        attempted: true,
+        success: false,
+        method: 'gm-download',
+        error: new Error('XBrowser cannot download non-http(s) URLs'),
+      };
+    }
+
     let fallbackTimerId = null;
     const clearFallbackTimer = () => {
       if (fallbackTimerId !== null) {
@@ -1008,6 +1130,7 @@
       name: filename,
       saveAs: false,
       ...(isMobileBrowser ? { confirm: false } : {}),
+      ...(IS_XBROWSER ? { confirm: true } : {}),
       onload: () => {
         clearFallbackTimer();
         if (fallbackTriggered) return;
@@ -1137,6 +1260,9 @@
     let lastResult = null;
     const resource = createDownloadResource(text, mime, options.revokeDelayMs);
     const doFallback = async () => {
+      if (IS_XBROWSER) {
+        return null;
+      }
       const anchorResult = saveWithAnchor(filename, resource);
       if (anchorResult.success) {
         return anchorResult;
@@ -1158,6 +1284,14 @@
         return picker;
       }
       lastResult = picker;
+    }
+
+    const shareResult = await saveWithShare(filename, text, mime);
+    if (shareResult.attempted) {
+      if (shareResult.success) {
+        return shareResult;
+      }
+      lastResult = shareResult;
     }
 
     const gmResult = await saveWithGMDownload(filename, resource, doFallback);
@@ -1216,6 +1350,9 @@
     const downloadNote = context.downloadDisabled
       ? '<div class="small">Tampermonkey downloads are disabled. Enable them in the extension settings to use GM_download.</div>'
       : '<div class="small">Tip: if downloads are disabled in Tampermonkey, enable them in extension settings.</div>';
+    const xbrowserNote = IS_XBROWSER
+      ? '<div class="small">In XBrowser, for network downloads you can select Android System Downloader or bind a third-party downloader in settings. Generated exports (blob/data) must be shared or copied.</div>'
+      : '';
     statusEl.innerHTML = `
       <div>If you didn't get a download prompt, try one of these:</div>
       <div class="actions">
@@ -1224,6 +1361,7 @@
         <button data-action="preview">Open preview</button>
         <button data-action="split">Split export</button>
       </div>
+      ${xbrowserNote}
       ${downloadNote}
     `;
     statusEl.querySelectorAll('button').forEach(button => {
@@ -1268,12 +1406,25 @@
         GMX.notification('Export saved.');
         return;
       }
+      if (result.success && (result.method === 'share-file' || result.method === 'share-text')) {
+        updateStatus(statusEl, 'Share sheet opened. Use Share to save the file.');
+        return;
+      }
+      if (result.success && (result.method === 'clipboard' || result.method === 'preview')) {
+        updateStatus(statusEl, 'Copied to clipboard. Use Share or paste into a file to save.');
+        return;
+      }
+      if (result.cancelled && result.method && result.method.startsWith('share')) {
+        updateStatus(statusEl, 'Share cancelled.');
+      }
       if (result.success) {
         updateStatus(statusEl, `Download attempted via ${result.method}. Waiting 15s for confirmation…`);
       } else if (result.method === 'gm-download' && result.error) {
         updateStatus(statusEl, 'Downloads appear disabled. Check your userscript manager download settings.');
       } else {
-        updateStatus(statusEl, 'Unable to trigger a download.');
+        updateStatus(statusEl, IS_XBROWSER
+          ? 'Unable to trigger a download. Use Share below for generated exports.'
+          : 'Unable to trigger a download.');
       }
       if (downloadDisabled && statusEl && result.method !== 'gm-download') {
         statusEl.textContent += ' (GM_download is disabled in your manager settings.)';
