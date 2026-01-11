@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.11.0215
+// @version      2026.01.11.0252
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PHBhdGggZD0iTTEwIDEzaDQiLz48cGF0aCBkPSJNMTAgMTdoNCIvPjxwYXRoIGQ9Ik0xMCA5aDIiLz48L3N2Zz4=
@@ -441,7 +441,6 @@
   const isXBrowserUA = /xbrowser|x\s*browser/i.test(navigator.userAgent || '');
   const IS_XBROWSER = isXBrowserScriptManager || isXBrowserUA;
   const DOWNLOAD_ANCHOR_DELAY_MS = 500;
-  const MOBILE_FALLBACK_DELAY_MS = 1200;
   const BLOB_STALE_MS = 10000;
   const BLOB_REVOKE_MS = 120000;
 
@@ -768,18 +767,10 @@
     }
     
     const cleanupDelay = gmDownloadAsync ? DOWNLOAD_ANCHOR_DELAY_MS : BLOB_REVOKE_MS;
-    let fallbackTimerId = null;
     let fallbackTriggered = false;
-    const clearFallbackTimer = () => {
-      if (fallbackTimerId !== null) {
-        clearTimeout(fallbackTimerId);
-        fallbackTimerId = null;
-      }
-    };
     const triggerFallback = (err) => {
       if (fallbackTriggered) return;
       fallbackTriggered = true;
-      clearFallbackTimer();
       resource.markStale();
       fallback(err);
     };
@@ -796,7 +787,6 @@
       ...(IS_XBROWSER ? { confirm: true } : {}),
       onload: () => {
         if (fallbackTriggered) return;
-        clearFallbackTimer();
         resource.cleanup(cleanupDelay);
       },
       onerror: (err) => {
@@ -804,16 +794,10 @@
       },
     };
     try {
-      if (isMobileBrowser) {
-        fallbackTimerId = setTimeout(() => {
-          triggerFallback(new Error('Mobile GM_download timeout'));
-        }, MOBILE_FALLBACK_DELAY_MS);
-      }
       const result = gmDownloadAsync ? gmDownloadAsync(detail) : gmDownloadLegacy(detail);
       if (result && typeof result.then === 'function') {
         const promise = result.then(() => {
           if (fallbackTriggered) return;
-          clearFallbackTimer();
           resource.cleanup(cleanupDelay);
         }).catch((err) => {
           triggerFallback(err);

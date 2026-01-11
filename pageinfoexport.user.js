@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PGxpbmUgeDE9IjEyIiB5MT0iMTgiIHgyPSIxMiIgeTI9IjEyIi8+PHBvbHlsaW5lIHBvaW50cz0iOSAxNSAxMiAxOCAxNSAxNSIvPjwvc3ZnPg==
-// @version      2026.01.11.0215
+// @version      2026.01.11.0252
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -284,7 +284,6 @@
   };
 
   const DOWNLOAD_ANCHOR_DELAY_MS = 500;
-  const MOBILE_FALLBACK_DELAY_MS = 1200;
   const BLOB_STALE_MS = 10000;
   const BLOB_REVOKE_MS = 120000;
   const isMobileBrowser = typeof navigator !== 'undefined'
@@ -1088,16 +1087,10 @@
     }
     let fallbackResult = null;
     let resolveLegacy = null;
-    let resolveMobileFallback = null;
     let fallbackTriggered = false;
     const legacyCompletion = new Promise((resolve) => {
       resolveLegacy = resolve;
     });
-    const mobileFallback = isMobileBrowser
-      ? new Promise((resolve) => {
-        resolveMobileFallback = resolve;
-      })
-      : null;
     const handleError = async (err) => {
       if (fallbackTriggered) return;
       fallbackTriggered = true;
@@ -1144,14 +1137,6 @@
       };
     }
 
-    let fallbackTimerId = null;
-    const clearFallbackTimer = () => {
-      if (fallbackTimerId !== null) {
-        clearTimeout(fallbackTimerId);
-        fallbackTimerId = null;
-      }
-    };
-
     const downloadDetails = {
       url: downloadUrl,
       name: filename,
@@ -1159,12 +1144,7 @@
       ...(isMobileBrowser ? { confirm: false } : {}),
       ...(IS_XBROWSER ? { confirm: true } : {}),
       onload: () => {
-        clearFallbackTimer();
         if (fallbackTriggered) return;
-        if (resolveMobileFallback) {
-          resolveMobileFallback({ success: true });
-          resolveMobileFallback = null;
-        }
         resource.cleanup(cleanupDelay);
         if (resolveLegacy) {
           resolveLegacy({ success: true });
@@ -1172,42 +1152,17 @@
         }
       },
       onerror: (err) => {
-        clearFallbackTimer();
-        if (resolveMobileFallback) {
-          resolveMobileFallback({ success: false });
-          resolveMobileFallback = null;
-        }
         void handleError(err);
       },
     };
 
     try {
-      if (isMobileBrowser) {
-        fallbackTimerId = setTimeout(() => {
-          if (fallbackTriggered) return;
-          if (resolveMobileFallback) {
-            resolveMobileFallback({ success: false });
-            resolveMobileFallback = null;
-          }
-          void handleError(new Error('Mobile GM_download timeout'));
-        }, MOBILE_FALLBACK_DELAY_MS);
-      }
       const downloadPromise = GMX.download(downloadDetails);
       if (downloadPromise && typeof downloadPromise.then === 'function') {
         const promise = downloadPromise.then(() => {
-          clearFallbackTimer();
           if (fallbackTriggered) return;
           resource.cleanup(cleanupDelay);
-          if (resolveMobileFallback) {
-            resolveMobileFallback({ success: true });
-            resolveMobileFallback = null;
-          }
         }).catch((err) => {
-          clearFallbackTimer();
-          if (resolveMobileFallback) {
-            resolveMobileFallback({ success: false });
-            resolveMobileFallback = null;
-          }
           return handleError(err);
         });
         if (!isMobileBrowser) {
@@ -1220,10 +1175,6 @@
         if (!fallbackTriggered) {
           resource.cleanup(cleanupDelay);
         }
-      }
-      if (mobileFallback) {
-        await mobileFallback;
-        clearFallbackTimer();
       }
     } catch (err) {
       await handleError(err);
