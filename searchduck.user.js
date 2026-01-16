@@ -4,7 +4,7 @@
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTEiIGN5PSIxMSIgcj0iOCIvPjxwYXRoIGQ9Im0yMSAyMS00LjM1LTQuMzUiLz48L3N2Zz4=
 // @description  DuckDuckGo search helper with site filters, file-type filters, site exclusions, bangs, and smart dorks.
-// @version      2026.01.10.0953
+// @version      2026.01.16.1631
 // @match        *://duckduckgo.com/*
 // @match        *://*.duckduckgo.com/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/searchduck.user.js
@@ -58,6 +58,10 @@
   Configuration:
   - Toggle enable/disable via shared UI or Tampermonkey menu.
   - Filter selections persist across sessions.
+  - Manual test (Android/XBrowser):
+    1) Enable the script on DuckDuckGo and open the shared panel.
+    2) Apply a filter set and run a search to confirm query updates.
+    3) Disable the script and confirm filters stop applying.
 */
 
 (() => {
@@ -299,6 +303,71 @@
     }
   };
 
+  /**
+   * Create a resource tracker for timers, observers, listeners, and DOM nodes.
+   * @returns {object} Tracker helpers.
+   */
+  const createResourceTracker = () => {
+    const tracker = {
+      intervals: new Set(),
+      timeouts: new Set(),
+      observers: new Set(),
+      listeners: [],
+      nodes: new Set()
+    };
+
+    return {
+      trackInterval(id) {
+        if (id) tracker.intervals.add(id);
+        return id;
+      },
+      trackTimeout(id) {
+        if (id) tracker.timeouts.add(id);
+        return id;
+      },
+      trackObserver(observer) {
+        if (observer) tracker.observers.add(observer);
+        return observer;
+      },
+      trackListener(target, type, handler, options) {
+        if (!target || !type || !handler) return;
+        target.addEventListener(type, handler, options);
+        tracker.listeners.push({ target, type, handler, options });
+      },
+      trackNode(node) {
+        if (node) tracker.nodes.add(node);
+        return node;
+      },
+      cleanup() {
+        tracker.intervals.forEach((id) => { try { clearInterval(id); } catch (_) {} });
+        tracker.timeouts.forEach((id) => { try { clearTimeout(id); } catch (_) {} });
+        tracker.observers.forEach((observer) => { try { observer.disconnect(); } catch (_) {} });
+        tracker.listeners.forEach(({ target, type, handler, options }) => {
+          try { target.removeEventListener(type, handler, options); } catch (_) {}
+        });
+        tracker.nodes.forEach((node) => { try { node.remove(); } catch (_) {} });
+        tracker.intervals.clear();
+        tracker.timeouts.clear();
+        tracker.observers.clear();
+        tracker.listeners.length = 0;
+        tracker.nodes.clear();
+      }
+    };
+  };
+
+  const resources = createResourceTracker();
+  const nativeSetTimeout = window.setTimeout.bind(window);
+  const nativeSetInterval = window.setInterval.bind(window);
+  const setTimeout = (...args) => resources.trackTimeout(nativeSetTimeout(...args));
+  const setInterval = (...args) => resources.trackInterval(nativeSetInterval(...args));
+  const NativeMutationObserver = window.MutationObserver;
+  const MutationObserver = function(callback) {
+    const observer = new NativeMutationObserver(callback);
+    resources.trackObserver(observer);
+    return observer;
+  };
+  MutationObserver.prototype = NativeMutationObserver.prototype;
+
   let sharedUi = null;
   let sharedUiReady = false;
   let registrationAttempted = false;
@@ -383,7 +452,7 @@
       // Always try registration when event fires (idempotent)
       tryRegisterScript();
     };
-    document.addEventListener('userscriptSharedUiReady', eventListenerRef);
+    resources.trackListener(document, 'userscriptSharedUiReady', eventListenerRef);
     
     // Polling fallback for race conditions where event already fired
     // or userscriptui.user.js loads after this script
@@ -496,6 +565,7 @@
     prefix: LOG_PREFIX,
     debug: DEBUG
   });
+
 
   //////////////////////////////////////////////////////////////
   // CORE LOGIC - SEARCH QUERY BUILDING
@@ -693,6 +763,10 @@
     log('debug', 'Selections loaded', state.selections);
   };
 
+  /**
+   * Render the shared UI panel for this script.
+   * @returns {HTMLDivElement} Panel root element.
+   */
   const renderPanel = () => {
     const panel = document.createElement('div');
     panel.style.cssText = 'padding: 12px; color: #e5e7eb; font-family: system-ui, sans-serif; font-size: 13px; max-height: 550px; overflow-y: auto;';
@@ -944,6 +1018,9 @@
   // STATE MANAGEMENT
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Register Tampermonkey menu commands.
+   */
   const registerMenu = () => {
     if (typeof GM_registerMenuCommand !== 'function') return;
     if (hasUnregister && state.menuIds.length) {
@@ -972,10 +1049,19 @@
     }
   };
 
+  /**
+   * Stop script activity.
+   * @returns {Promise<void>}
+   */
   const stop = async () => {
     state.started = false;
+    resources.cleanup();
   };
 
+  /**
+   * Start script activity if not already started.
+   * @returns {Promise<void>}
+   */
   const start = async () => {
     if (state.started) return;
     state.started = true;
@@ -983,6 +1069,11 @@
     log('info', 'DuckDuckGo Expert Search ready');
   };
 
+  /**
+   * Enable or disable the script.
+   * @param {boolean} value Desired enabled state.
+   * @returns {Promise<void>}
+   */
   const setEnabled = async (value) => {
     state.enabled = !!value;
     await gmStore.set(ENABLE_KEY, state.enabled);
@@ -1001,6 +1092,10 @@
   // INITIALIZATION
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Initialize state, UI registration, and startup behavior.
+   * @returns {Promise<void>}
+   */
   const initToggle = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
     await loadSelections();

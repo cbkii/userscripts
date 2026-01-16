@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Page Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2025.12.30.0146
+// @version      2026.01.16.1631
 // @description  Unlock text selection, copy/paste, and context menu on restrictive sites. Optional overlay buster + aggressive mode. Lightweight + SPA-friendly.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHJlY3QgeD0iMyIgeT0iMTEiIHdpZHRoPSIxOCIgaGVpZ2h0PSIxMSIgcng9IjIiIHJ5PSIyIi8+PHBhdGggZD0iTTcgMTFWN2E1IDUgMCAwIDEgOS45LTEiLz48L3N2Zz4=
@@ -39,6 +39,10 @@
   - Toggle aggressive mode, overlay buster, and other options via menu commands.
   - Per-host disable list to exclude sites where unlocking causes issues.
   - Keyboard shortcut (Alt+Shift+U by default) to quickly toggle the unlocker.
+  - Manual test (Android/XBrowser):
+    1) Enable Page Unlocker and Always Run in shared UI.
+    2) Load a restrictive page and verify selection + copy works.
+    3) Disable the script and confirm no further changes occur after reload.
 */
 
 (function () {
@@ -97,6 +101,11 @@
   };
 
 
+  /**
+   * Normalize persisted configuration with defaults.
+   * @param {object|null|undefined} input Raw config object.
+   * @returns {object} Normalized config.
+   */
   function normaliseCfg(input) {
     const cfg = Object.assign({}, DEFAULT_CFG, (input && typeof input === 'object') ? input : {});
     if (!Array.isArray(cfg.disabledHosts)) cfg.disabledHosts = [];
@@ -110,6 +119,10 @@
   const state = {
     menuIds: [],
     observers: [], // Track MutationObservers for cleanup
+    resources: null,
+    historyPatched: false,
+    originalPushState: null,
+    originalReplaceState: null,
   };
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
   const MENU_PREFIX = '[Unlock]';
@@ -119,6 +132,10 @@
   let sharedUiReady = false;
   let registrationAttempted = false;
 
+  /**
+   * Register with the shared UI if available.
+   * @param {Function|undefined} tryRegister Shared UI helper callback.
+   */
   function attemptSharedUiRegistration(tryRegister) {
     if (registrationAttempted) return;
     if (typeof tryRegister === 'function') {
@@ -266,6 +283,10 @@
   // SHARED UI + MENU
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Toggle script enabled state and reload.
+   * @param {boolean} next Next enabled state.
+   */
   function setEnabled(next) {
     cfg.enabled = !!next;
     gmSet(STORAGE_KEY, cfg);
@@ -273,11 +294,13 @@
       sharedUi.setScriptEnabled(SCRIPT_ID, cfg.enabled);
     }
     registerMenu();
-    // Cleanup observers before reload
-    disconnectObservers();
+    cleanupResources();
     location.reload();
   }
 
+  /**
+   * Disconnect tracked MutationObservers.
+   */
   function disconnectObservers() {
     // Disconnect all tracked MutationObservers
     if (state.observers && state.observers.length > 0) {
@@ -290,13 +313,100 @@
     }
   }
 
+  /**
+   * Create a resource tracker for timers, observers, listeners, and DOM nodes.
+   * @returns {object} Tracker with register/cleanup helpers.
+   */
+  function createResourceTracker() {
+    const tracker = {
+      intervals: new Set(),
+      timeouts: new Set(),
+      observers: new Set(),
+      listeners: [],
+      nodes: new Set(),
+      styles: new Set(),
+    };
+
+    return {
+      trackInterval(id) {
+        if (id) tracker.intervals.add(id);
+        return id;
+      },
+      trackTimeout(id) {
+        if (id) tracker.timeouts.add(id);
+        return id;
+      },
+      trackObserver(observer) {
+        if (observer) tracker.observers.add(observer);
+        return observer;
+      },
+      trackListener(target, type, handler, options) {
+        if (!target || !type || !handler) return;
+        target.addEventListener(type, handler, options);
+        tracker.listeners.push({ target, type, handler, options });
+      },
+      trackNode(node) {
+        if (node) tracker.nodes.add(node);
+        return node;
+      },
+      trackStyle(node) {
+        if (node) tracker.styles.add(node);
+        return node;
+      },
+      cleanup() {
+        tracker.intervals.forEach((id) => { try { clearInterval(id); } catch (_) {} });
+        tracker.timeouts.forEach((id) => { try { clearTimeout(id); } catch (_) {} });
+        tracker.observers.forEach((observer) => { try { observer.disconnect(); } catch (_) {} });
+        tracker.listeners.forEach(({ target, type, handler, options }) => {
+          try { target.removeEventListener(type, handler, options); } catch (_) {}
+        });
+        tracker.nodes.forEach((node) => { try { node.remove(); } catch (_) {} });
+        tracker.styles.forEach((node) => { try { node.remove(); } catch (_) {} });
+        tracker.intervals.clear();
+        tracker.timeouts.clear();
+        tracker.observers.clear();
+        tracker.listeners.length = 0;
+        tracker.nodes.clear();
+        tracker.styles.clear();
+      }
+    };
+  }
+
+  /**
+   * Clean up all tracked resources and observers.
+   */
+  function cleanupResources() {
+    disconnectObservers();
+    if (state.resources) {
+      state.resources.cleanup();
+      state.resources = null;
+    }
+    if (state.historyPatched) {
+      try {
+        if (state.originalPushState) history.pushState = state.originalPushState;
+        if (state.originalReplaceState) history.replaceState = state.originalReplaceState;
+      } catch (_) {}
+      state.historyPatched = false;
+    }
+  }
+
+  /**
+   * Toggle Always Run and reload.
+   * @param {boolean} next Next Always Run state.
+   */
   function setAlwaysRun(next) {
     cfg.alwaysRun = !!next;
     gmSet(STORAGE_KEY, cfg);
     registerMenu();
+    cleanupResources();
     location.reload();
   }
 
+
+  /**
+   * Enable or disable on current host and reload.
+   * @param {boolean} enable Whether to enable on this host.
+   */
   function toggleSite(enable) {
     const nextEnabled = typeof enable === 'boolean' ? enable : isHostDisabled;
     const set = new Set(cfg.disabledHosts);
@@ -310,37 +420,61 @@
     cfg.disabledHosts = [...set].sort();
     gmSet(STORAGE_KEY, cfg);
     registerMenu();
+    cleanupResources();
     location.reload();
   }
 
+  /**
+   * Toggle aggressive mode and reload.
+   * @param {boolean} next Desired aggressive state.
+   */
   function toggleAggressive(next) {
     cfg.aggressive = typeof next === 'boolean' ? next : !cfg.aggressive;
     gmSet(STORAGE_KEY, cfg);
     registerMenu();
+    cleanupResources();
     location.reload();
   }
 
+  /**
+   * Toggle overlay buster and reload.
+   * @param {boolean} next Desired overlay buster state.
+   */
   function toggleOverlayBuster(next) {
     cfg.overlayBuster = typeof next === 'boolean' ? next : !cfg.overlayBuster;
     gmSet(STORAGE_KEY, cfg);
     registerMenu();
+    cleanupResources();
     location.reload();
   }
 
+  /**
+   * Toggle copy tail cleaner and reload.
+   * @param {boolean} next Desired copy tail cleaner state.
+   */
   function toggleCopyTail(next) {
     cfg.cleanCopyTail = typeof next === 'boolean' ? next : !cfg.cleanCopyTail;
     gmSet(STORAGE_KEY, cfg);
     registerMenu();
+    cleanupResources();
     location.reload();
   }
 
+  /**
+   * Toggle key event interception and reload.
+   * @param {boolean} next Desired key interception state.
+   */
   function toggleInterceptKeys(next) {
     cfg.interceptKeys = typeof next === 'boolean' ? next : !cfg.interceptKeys;
     gmSet(STORAGE_KEY, cfg);
     registerMenu();
+    cleanupResources();
     location.reload();
   }
 
+  /**
+   * Execute a manual unlock and notify.
+   */
   function runForceUnlock() {
     try {
       forceUnlockNow();
@@ -351,11 +485,17 @@
     }
   }
 
+  /**
+   * Reset stored settings and reload.
+   */
   function resetSettings() {
     gmDel(STORAGE_KEY);
     location.reload();
   }
 
+  /**
+   * Register Tampermonkey menu commands.
+   */
   function registerMenu() {
     if (typeof GM_registerMenuCommand !== 'function') return;
     if (hasUnregister && state.menuIds.length) {
@@ -402,6 +542,10 @@
     ));
   }
 
+  /**
+   * Render the shared UI panel for this script.
+   * @returns {HTMLDivElement} Panel root element.
+   */
   function renderPanel() {
     const panel = document.createElement('div');
     panel.style.cssText = 'padding: 12px; color: #e5e7eb; font-family: system-ui, sans-serif; font-size: 13px;';
@@ -466,12 +610,6 @@
     return panel;
   }
 
-  registerMenu();
-
-  // Always return early if globally/site disabled, but keep menu available.
-  // Dormant by default: only run automatically if Always Run is enabled
-  if (!cfg.enabled || isHostDisabled || !cfg.alwaysRun) return;
-
   // --- Core behaviour ---
   const EVENT_BASE = [
     'contextmenu',
@@ -508,21 +646,56 @@
   `;
 
   let styleEl = null;
+  let styleEnsureScheduled = false;
 
+  /**
+   * Ensure the unlock CSS is appended last in head.
+   */
   function ensureStyleLast() {
     try {
       if (!styleEl) styleEl = document.getElementById(STYLE_ID);
       if (!styleEl) {
-        styleEl = document.createElement('style');
+        styleEl = state.resources
+          ? state.resources.trackStyle(document.createElement('style'))
+          : document.createElement('style');
         styleEl.id = STYLE_ID;
         styleEl.type = 'text/css';
         styleEl.textContent = UNLOCK_CSS;
       }
       const parent = document.head || document.documentElement;
-      if (parent) parent.appendChild(styleEl); // appendChild moves existing node to the end
+      if (!parent) return;
+      if (styleEl.parentNode !== parent) {
+        parent.appendChild(styleEl);
+        return;
+      }
+      if (parent.lastElementChild !== styleEl) {
+        parent.appendChild(styleEl);
+      }
     } catch (_) {}
   }
 
+  /**
+   * Debounce style reinsertion using RAF/timeout.
+   */
+  function scheduleEnsureStyleLast() {
+    if (styleEnsureScheduled) return;
+    styleEnsureScheduled = true;
+    const trigger = () => {
+      styleEnsureScheduled = false;
+      ensureStyleLast();
+    };
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(trigger);
+    } else if (state.resources) {
+      state.resources.trackTimeout(setTimeout(trigger, 0));
+    } else {
+      setTimeout(trigger, 0);
+    }
+  }
+
+  /**
+   * Remove top-level DOM0 event handlers that block interactions.
+   */
   function clearTopLevelDom0Handlers() {
     const targets = [document, document.documentElement, document.body].filter(Boolean);
     const props = [
@@ -540,19 +713,36 @@
     }
   }
 
+  /**
+   * Stop event propagation for restrictive handlers.
+   * @param {Event} e Event to stop.
+   */
   function stopPropagationEarly(e) {
     // Don’t call preventDefault here; we want native behaviour.
     e.stopImmediatePropagation();
   }
 
+  /**
+   * Install capture-phase event stoppers.
+   * @param {string[]} types Event types to intercept.
+   */
   function installEventStoppers(types) {
     for (const type of types) {
-      document.addEventListener(type, stopPropagationEarly, true);
-      window.addEventListener(type, stopPropagationEarly, true);
+      if (state.resources) {
+        state.resources.trackListener(document, type, stopPropagationEarly, true);
+        state.resources.trackListener(window, type, stopPropagationEarly, true);
+      } else {
+        document.addEventListener(type, stopPropagationEarly, true);
+        window.addEventListener(type, stopPropagationEarly, true);
+      }
     }
   }
 
   // Optional copy-tail cleaner.
+  /**
+   * Capture copy events and clean attribution tails.
+   * @param {ClipboardEvent} e Copy event.
+   */
   function onCopyCapture(e) {
     if (!cfg.cleanCopyTail) return;
     try {
@@ -572,12 +762,23 @@
     } catch (_) {}
   }
 
+  /**
+   * Install copy cleaner event listener when enabled.
+   */
   function installCopyCleaner() {
     if (!cfg.cleanCopyTail) return;
-    document.addEventListener('copy', onCopyCapture, true);
+    if (state.resources) {
+      state.resources.trackListener(document, 'copy', onCopyCapture, true);
+    } else {
+      document.addEventListener('copy', onCopyCapture, true);
+    }
   }
 
   // --- Aggressive mode: patch page context to ignore event hooks for our blocked event types ---
+  /**
+   * Inject page-context event patches for blocked event types.
+   * @param {string[]} blockedTypes Event types to block.
+   */
   function injectAggressivePatch(blockedTypes) {
     try {
       if (window[PATCH_FLAG]) return;
@@ -636,6 +837,9 @@
   // --- Overlay buster ---
   const overlaySeen = new WeakSet();
 
+  /**
+   * Restore scrollability on root elements.
+   */
   function restoreScroll() {
     const targets = [document.documentElement, document.body].filter(Boolean);
     for (const t of targets) {
@@ -648,6 +852,11 @@
     }
   }
 
+  /**
+   * Determine if a node looks like a blocking overlay.
+   * @param {Element} el Candidate element.
+   * @returns {boolean} True when overlay heuristics match.
+   */
   function isLikelyFullscreenOverlay(el) {
     try {
       if (!el || el.nodeType !== 1) return false;
@@ -683,6 +892,10 @@
     }
   }
 
+  /**
+   * Remove or hide an overlay element.
+   * @param {Element} el Overlay element.
+   */
   function removeOverlay(el) {
     try {
       overlaySeen.add(el);
@@ -695,6 +908,10 @@
     } catch (_) {}
   }
 
+  /**
+   * Scan a subtree for likely overlays and remove them.
+   * @param {Element|Node} root Root node to scan.
+   */
   function scanNodeForOverlays(root) {
     if (!cfg.overlayBuster) return;
     if (!root) return;
@@ -723,6 +940,9 @@
     }
   }
 
+  /**
+   * Run manual unlock operations immediately.
+   */
   function forceUnlockNow() {
     ensureStyleLast();
     clearTopLevelDom0Handlers();
@@ -739,11 +959,17 @@
   }
 
   // --- SPA navigation: re-apply on history changes ---
+  /**
+   * Hook SPA navigation to re-apply unlock steps.
+   */
   function hookHistory() {
     try {
       const wrap = (fnName) => {
         const orig = history[fnName];
         if (typeof orig !== 'function') return;
+        if (fnName === 'pushState') state.originalPushState = orig;
+        if (fnName === 'replaceState') state.originalReplaceState = orig;
+        state.historyPatched = true;
         history[fnName] = function () {
           const r = orig.apply(this, arguments);
           queueMicrotask(() => {
@@ -755,17 +981,27 @@
       };
       wrap('pushState');
       wrap('replaceState');
-      window.addEventListener('popstate', () => {
+      const onPop = () => {
         ensureStyleLast();
         clearTopLevelDom0Handlers();
-      }, true);
+      };
+      if (state.resources) {
+        state.resources.trackListener(window, 'popstate', onPop, true);
+      } else {
+        window.addEventListener('popstate', onPop, true);
+      }
     } catch (_) {}
   }
 
   // --- Observers ---
+  /**
+   * Install MutationObservers for style and overlay handling.
+   */
   function installObservers() {
     // 1) Keep our style last if the site injects later CSS.
-    const headWatcher = new MutationObserver(() => ensureStyleLast());
+    const headWatcher = state.resources
+      ? state.resources.trackObserver(new MutationObserver(() => scheduleEnsureStyleLast()))
+      : new MutationObserver(() => scheduleEnsureStyleLast());
 
     const attachHeadWatcher = () => {
       const head = document.head;
@@ -781,11 +1017,14 @@
 
     if (!attachHeadWatcher()) {
       // Wait for <head>.
-      const wait = new MutationObserver(() => {
-        if (attachHeadWatcher()) wait.disconnect();
-      });
+      const wait = state.resources
+        ? state.resources.trackObserver(new MutationObserver(() => {
+          if (attachHeadWatcher()) wait.disconnect();
+        }))
+        : new MutationObserver(() => {
+          if (attachHeadWatcher()) wait.disconnect();
+        });
       wait.observe(document.documentElement, { childList: true, subtree: true });
-      // Don't track 'wait' - it disconnects itself
     }
 
     // 2) Remove newly-added inline handlers for the key events.
@@ -798,21 +1037,37 @@
       'onpaste',
     ];
 
-    const attrWatcher = new MutationObserver((muts) => {
-      for (const m of muts) {
-        const el = m.target;
-        if (!el || el.nodeType !== 1) continue;
-        const a = m.attributeName;
-        if (!a) continue;
-        if (attrFilter.includes(a)) {
-          try {
-            el.removeAttribute(a);
-            // Also clear property in case the browser reflected it.
-            el[a] = null;
-          } catch (_) {}
+    const attrWatcher = state.resources
+      ? state.resources.trackObserver(new MutationObserver((muts) => {
+        for (const m of muts) {
+          const el = m.target;
+          if (!el || el.nodeType !== 1) continue;
+          const a = m.attributeName;
+          if (!a) continue;
+          if (attrFilter.includes(a)) {
+            try {
+              el.removeAttribute(a);
+              // Also clear property in case the browser reflected it.
+              el[a] = null;
+            } catch (_) {}
+          }
         }
-      }
-    });
+      }))
+      : new MutationObserver((muts) => {
+        for (const m of muts) {
+          const el = m.target;
+          if (!el || el.nodeType !== 1) continue;
+          const a = m.attributeName;
+          if (!a) continue;
+          if (attrFilter.includes(a)) {
+            try {
+              el.removeAttribute(a);
+              // Also clear property in case the browser reflected it.
+              el[a] = null;
+            } catch (_) {}
+          }
+        }
+      });
 
     attrWatcher.observe(document.documentElement, {
       subtree: true,
@@ -824,13 +1079,43 @@
 
     // 3) Overlay buster for new nodes (cheap incremental scan).
     if (cfg.overlayBuster) {
-      const overlayWatcher = new MutationObserver((muts) => {
-        for (const m of muts) {
-          for (const n of m.addedNodes || []) {
-            scanNodeForOverlays(n);
-          }
+      const overlayQueue = new Set();
+      let overlayScanScheduled = false;
+      const flushOverlayQueue = () => {
+        overlayScanScheduled = false;
+        if (!overlayQueue.size) return;
+        const nodes = Array.from(overlayQueue);
+        overlayQueue.clear();
+        for (const node of nodes) {
+          scanNodeForOverlays(node);
         }
-      });
+      };
+      const scheduleOverlayScan = () => {
+        if (overlayScanScheduled) return;
+        overlayScanScheduled = true;
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(flushOverlayQueue);
+        } else {
+          setTimeout(flushOverlayQueue, 16);
+        }
+      };
+      const overlayWatcher = state.resources
+        ? state.resources.trackObserver(new MutationObserver((muts) => {
+          for (const m of muts) {
+            for (const n of m.addedNodes || []) {
+              overlayQueue.add(n);
+            }
+          }
+          scheduleOverlayScan();
+        }))
+        : new MutationObserver((muts) => {
+          for (const m of muts) {
+            for (const n of m.addedNodes || []) {
+              overlayQueue.add(n);
+            }
+          }
+          scheduleOverlayScan();
+        });
 
       // Attach when body exists.
       const attachBody = () => {
@@ -844,19 +1129,25 @@
       };
 
       if (!attachBody()) {
-        const waitBody = new MutationObserver(() => {
-          if (attachBody()) waitBody.disconnect();
-        });
+        const waitBody = state.resources
+          ? state.resources.trackObserver(new MutationObserver(() => {
+            if (attachBody()) waitBody.disconnect();
+          }))
+          : new MutationObserver(() => {
+            if (attachBody()) waitBody.disconnect();
+          });
         waitBody.observe(document.documentElement, { childList: true, subtree: true });
-        // Don't track 'waitBody' - it disconnects itself
       }
     }
   }
 
   // --- Hotkey ---
+  /**
+   * Install the hotkey listener for manual unlock.
+   */
   function installHotkey() {
     const hk = cfg.hotkey || DEFAULT_CFG.hotkey;
-    document.addEventListener('keydown', (e) => {
+    const handler = (e) => {
       if (!!hk.alt !== e.altKey) return;
       if (!!hk.shift !== e.shiftKey) return;
       if (hk.ctrl && !e.ctrlKey) return;
@@ -865,25 +1156,45 @@
 
       e.stopImmediatePropagation();
       forceUnlockNow();
-    }, true);
+    };
+    if (state.resources) {
+      state.resources.trackListener(document, 'keydown', handler, true);
+    } else {
+      document.addEventListener('keydown', handler, true);
+    }
   }
 
   //////////////////////////////////////////////////////////////
   // INITIALIZATION 
   //////////////////////////////////////////////////////////////
 
-  // --- Bootstrap ---
-  ensureStyleLast();
-  clearTopLevelDom0Handlers();
+  /**
+   * Main entrypoint for Page Unlocker.
+   */
+  function main() {
+    registerMenu();
 
-  if (cfg.aggressive) {
-    // In aggressive mode we also block more event types (including mouse/key) at the page level.
-    injectAggressivePatch(stopEvents.concat(['mousedown', 'mouseup', 'click', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'keydown', 'keypress', 'keyup']));
+    // Always return early if globally/site disabled, but keep menu available.
+    // Dormant by default: only run automatically if Always Run is enabled
+    if (!cfg.enabled || isHostDisabled || !cfg.alwaysRun) return;
+
+    state.resources = createResourceTracker();
+
+    // --- Bootstrap ---
+    ensureStyleLast();
+    clearTopLevelDom0Handlers();
+
+    if (cfg.aggressive) {
+      // In aggressive mode we also block more event types (including mouse/key) at the page level.
+      injectAggressivePatch(stopEvents.concat(['mousedown', 'mouseup', 'click', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'keydown', 'keypress', 'keyup']));
+    }
+
+    installEventStoppers(stopEvents);
+    installCopyCleaner();
+    installObservers();
+    hookHistory();
+    installHotkey();
   }
 
-  installEventStoppers(stopEvents);
-  installCopyCleaner();
-  installObservers();
-  hookHistory();
-  installHotkey();
+  main();
 })();
