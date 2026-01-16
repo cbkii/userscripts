@@ -1159,6 +1159,9 @@
     let resolveLegacy = null;
     let resolveMobileFallback = null;
     let fallbackTriggered = false;
+    let fallbackAttempted = false;
+    let allowAutoFallback = true;
+    let lastError = null;
     const legacyCompletion = new Promise((resolve) => {
       resolveLegacy = resolve;
     });
@@ -1171,6 +1174,8 @@
       if (fallbackTriggered) return;
       fallbackTriggered = true;
       resource.markStale();
+      fallbackAttempted = true;
+      lastError = err;
       fallbackResult = await fallback(err);
       if (resolveLegacy) {
         resolveLegacy({ success: false });
@@ -1258,7 +1263,8 @@
             resolveMobileFallback({ success: false });
             resolveMobileFallback = null;
           }
-          void handleError(new Error('Mobile GM_download timeout'));
+          allowAutoFallback = false;
+          lastError = new Error('Mobile GM_download timeout');
         }, MOBILE_FALLBACK_DELAY_MS);
       }
       const downloadPromise = GMX.download(downloadDetails);
@@ -1301,14 +1307,44 @@
         success: fallbackResult?.success || false,
         method: fallbackResult?.method || 'gm-download',
         error: err,
+        fallbackAttempted,
+        allowAutoFallback,
       };
     }
 
     if (fallbackResult) {
-      return fallbackResult;
+      return { ...fallbackResult, fallbackAttempted: true };
     }
 
-    return { attempted: true, success: true, method: 'gm-download' };
+    if (fallbackAttempted) {
+      return {
+        attempted: true,
+        success: false,
+        method: 'gm-download',
+        error: lastError || new Error('GM_download fallback failed'),
+        fallbackAttempted,
+        allowAutoFallback,
+      };
+    }
+
+    if (lastError && !allowAutoFallback) {
+      return {
+        attempted: true,
+        success: false,
+        method: 'gm-download',
+        error: lastError,
+        fallbackAttempted,
+        allowAutoFallback,
+      };
+    }
+
+    return {
+      attempted: true,
+      success: true,
+      method: 'gm-download',
+      fallbackAttempted,
+      allowAutoFallback,
+    };
   }
 
   function saveWithAnchor(filename, resource) {
@@ -1396,6 +1432,10 @@
         return gmResult;
       }
       lastResult = gmResult;
+    }
+
+    if (gmResult.fallbackAttempted || gmResult.allowAutoFallback === false) {
+      return lastResult || { attempted: false, success: false, method: 'none' };
     }
 
     const fallbackResult = await doFallback();
