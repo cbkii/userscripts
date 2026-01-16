@@ -3,7 +3,7 @@
 // @namespace    https://github.com/cbkii/userscripts
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PGxpbmUgeDE9IjEyIiB5MT0iMTgiIHgyPSIxMiIgeTI9IjEyIi8+PHBvbHlsaW5lIHBvaW50cz0iOSAxNSAxMiAxOCAxNSAxNSIvPjwvc3ZnPg==
-// @version      2026.01.11.0252
+// @version      2026.01.16.1631
 // @description  Export page DOM, scripts, styles, and performance data on demand with safe download fallbacks.
 // @match        *://*/*
 // @updateURL    https://raw.githubusercontent.com/cbkii/userscripts/main/pageinfoexport.user.js
@@ -41,6 +41,10 @@
 
   Configuration:
   - Default options are hard-coded in DEFAULT_OPTIONS (mode, split, delay, shadow/iframe capture).
+  - Manual test (Android/XBrowser):
+    1) Enable the script and open a page with rich content.
+    2) Trigger an export and confirm the download or share action.
+    3) Disable the script and verify menu commands are removed.
 */
 
 (() => {
@@ -70,6 +74,70 @@
       try { await GM_setValue(key, value); } catch (_) {}
     }
   };
+  /**
+   * Create a resource tracker for timers, observers, listeners, and DOM nodes.
+   * @returns {object} Tracker helpers.
+   */
+  const createResourceTracker = () => {
+    const tracker = {
+      intervals: new Set(),
+      timeouts: new Set(),
+      observers: new Set(),
+      listeners: [],
+      nodes: new Set()
+    };
+
+    return {
+      trackInterval(id) {
+        if (id) tracker.intervals.add(id);
+        return id;
+      },
+      trackTimeout(id) {
+        if (id) tracker.timeouts.add(id);
+        return id;
+      },
+      trackObserver(observer) {
+        if (observer) tracker.observers.add(observer);
+        return observer;
+      },
+      trackListener(target, type, handler, options) {
+        if (!target || !type || !handler) return;
+        target.addEventListener(type, handler, options);
+        tracker.listeners.push({ target, type, handler, options });
+      },
+      trackNode(node) {
+        if (node) tracker.nodes.add(node);
+        return node;
+      },
+      cleanup() {
+        tracker.intervals.forEach((id) => { try { clearInterval(id); } catch (_) {} });
+        tracker.timeouts.forEach((id) => { try { clearTimeout(id); } catch (_) {} });
+        tracker.observers.forEach((observer) => { try { observer.disconnect(); } catch (_) {} });
+        tracker.listeners.forEach(({ target, type, handler, options }) => {
+          try { target.removeEventListener(type, handler, options); } catch (_) {}
+        });
+        tracker.nodes.forEach((node) => { try { node.remove(); } catch (_) {} });
+        tracker.intervals.clear();
+        tracker.timeouts.clear();
+        tracker.observers.clear();
+        tracker.listeners.length = 0;
+        tracker.nodes.clear();
+      }
+    };
+  };
+
+  const resources = createResourceTracker();
+  const nativeSetTimeout = window.setTimeout.bind(window);
+  const nativeSetInterval = window.setInterval.bind(window);
+  const setTimeout = (...args) => resources.trackTimeout(nativeSetTimeout(...args));
+  const setInterval = (...args) => resources.trackInterval(nativeSetInterval(...args));
+  const NativeMutationObserver = window.MutationObserver;
+  const MutationObserver = function(callback) {
+    const observer = new NativeMutationObserver(callback);
+    resources.trackObserver(observer);
+    return observer;
+  };
+  MutationObserver.prototype = NativeMutationObserver.prototype;
   // Robust shared UI detection across sandbox boundaries
   // Try to use helper from userscriptui.user.js if available, otherwise use fallback
   let sharedUi = null;
@@ -168,7 +236,7 @@
       // Always try registration when event fires (idempotent)
       tryRegisterScript();
     };
-    document.addEventListener('userscriptSharedUiReady', eventListenerRef);
+    resources.trackListener(document, 'userscriptSharedUiReady', eventListenerRef);
     
     // Polling fallback for race conditions where event already fired
     // or userscriptui.user.js loads after this script
@@ -410,6 +478,7 @@
     prefix: LOG_PREFIX,
     debug: DEBUG
   });
+
 
   const pad = n => (n < 10 ? '0' : '') + n;
   const nowStamp = () => {
@@ -1088,6 +1157,9 @@
     let fallbackResult = null;
     let resolveLegacy = null;
     let fallbackTriggered = false;
+    let fallbackAttempted = false;
+    let allowAutoFallback = true;
+    let lastError = null;
     const legacyCompletion = new Promise((resolve) => {
       resolveLegacy = resolve;
     });
@@ -1095,6 +1167,8 @@
       if (fallbackTriggered) return;
       fallbackTriggered = true;
       resource.markStale();
+      fallbackAttempted = true;
+      lastError = err;
       fallbackResult = await fallback(err);
       if (resolveLegacy) {
         resolveLegacy({ success: false });
@@ -1183,14 +1257,44 @@
         success: fallbackResult?.success || false,
         method: fallbackResult?.method || 'gm-download',
         error: err,
+        fallbackAttempted,
+        allowAutoFallback,
       };
     }
 
     if (fallbackResult) {
-      return fallbackResult;
+      return { ...fallbackResult, fallbackAttempted: true };
     }
 
-    return { attempted: true, success: true, method: 'gm-download' };
+    if (fallbackAttempted) {
+      return {
+        attempted: true,
+        success: false,
+        method: 'gm-download',
+        error: lastError || new Error('GM_download fallback failed'),
+        fallbackAttempted,
+        allowAutoFallback,
+      };
+    }
+
+    if (lastError && !allowAutoFallback) {
+      return {
+        attempted: true,
+        success: false,
+        method: 'gm-download',
+        error: lastError,
+        fallbackAttempted,
+        allowAutoFallback,
+      };
+    }
+
+    return {
+      attempted: true,
+      success: true,
+      method: 'gm-download',
+      fallbackAttempted,
+      allowAutoFallback,
+    };
   }
 
   function saveWithAnchor(filename, resource) {
@@ -1278,6 +1382,10 @@
         return gmResult;
       }
       lastResult = gmResult;
+    }
+
+    if (gmResult.fallbackAttempted || gmResult.allowAutoFallback === false) {
+      return lastResult || { attempted: false, success: false, method: 'none' };
     }
 
     const fallbackResult = await doFallback();
@@ -1449,6 +1557,10 @@
     updateStatus(statusEl, 'Split download attempts completed.');
   }
 
+  /**
+   * Render the shared UI panel for this script.
+   * @returns {HTMLDivElement} Panel root element.
+   */
   const renderPanel = () => {
     const wrapper = document.createElement('div');
     wrapper.style.display = 'flex';
@@ -1481,6 +1593,7 @@
 
     buttons.appendChild(exportBtn);
     wrapper.appendChild(buttons);
+
     return wrapper;
   };
 
@@ -1488,6 +1601,9 @@
   // STATE MANAGEMENT
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Register Tampermonkey menu commands.
+   */
   const registerMenu = () => {
     if (typeof GM_registerMenuCommand !== 'function') return;
     if (hasUnregister && state.menuIds.length) {
@@ -1506,16 +1622,30 @@
     }
   };
 
+  /**
+   * Stop the script and remove any overlays.
+   * @returns {Promise<void>}
+   */
   const stop = async () => {
     state.started = false;
     removeOverlay();
+    resources.cleanup();
   };
 
+  /**
+   * Start the script state if not already started.
+   * @returns {Promise<void>}
+   */
   const start = async () => {
     if (state.started) return;
     state.started = true;
   };
 
+  /**
+   * Enable or disable the script.
+   * @param {boolean} value Desired enabled state.
+   * @returns {Promise<void>}
+   */
   const setEnabled = async (value) => {
     state.enabled = !!value;
     await gmStore.set(ENABLE_KEY, state.enabled);
@@ -1534,6 +1664,10 @@
   // INITIALIZATION
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Initialize state, UI registration, and startup behavior.
+   * @returns {Promise<void>}
+   */
   const init = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
     state.alwaysRun = await gmStore.get(ALWAYS_RUN_KEY, false);

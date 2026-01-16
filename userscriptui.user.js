@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Shared UI Manager
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.04.1428
+// @version      2026.01.16.1631
 // @description  Provides a shared hotpink dock + dark modal with per-script tabs, toggles, and persistent layout for all userscripts.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHJlY3QgeD0iMyIgeT0iMyIgd2lkdGg9IjciIGhlaWdodD0iNyIvPjxyZWN0IHg9IjE0IiB5PSIzIiB3aWR0aD0iNyIgaGVpZ2h0PSI3Ii8+PHJlY3QgeD0iMTQiIHk9IjE0IiB3aWR0aD0iNyIgaGVpZ2h0PSI3Ii8+PHJlY3QgeD0iMyIgeT0iMTQiIHdpZHRoPSI3IiBoZWlnaHQ9IjciLz48L3N2Zz4=
@@ -34,6 +34,10 @@
   Configuration:
   - Position can be flipped between bottom-right and bottom-left via the “Flip” button.
   - Scripts should pass onEnable/onDisable callbacks to manage teardown/startup.
+  - Manual test (Android/XBrowser):
+    1) Enable userscriptui.user.js and open any page.
+    2) Tap the hotpink button to open/close the shared modal.
+    3) Toggle a script panel and confirm it updates its enabled state.
 */
 
 // Shared UI module for userscripts
@@ -69,6 +73,71 @@
 
   const isTouch = () => 'ontouchstart' in SAFE_DOC.documentElement;
   const clickEvent = isTouch() ? 'touchstart' : 'click';
+  /**
+   * Create a resource tracker for timers, observers, listeners, and DOM nodes.
+   * @returns {object} Tracker helpers.
+   */
+  const createResourceTracker = () => {
+    const tracker = {
+      intervals: new Set(),
+      timeouts: new Set(),
+      observers: new Set(),
+      listeners: [],
+      nodes: new Set()
+    };
+
+    return {
+      trackInterval(id) {
+        if (id) tracker.intervals.add(id);
+        return id;
+      },
+      trackTimeout(id) {
+        if (id) tracker.timeouts.add(id);
+        return id;
+      },
+      trackObserver(observer) {
+        if (observer) tracker.observers.add(observer);
+        return observer;
+      },
+      trackListener(target, type, handler, options) {
+        if (!target || !type || !handler) return;
+        target.addEventListener(type, handler, options);
+        tracker.listeners.push({ target, type, handler, options });
+      },
+      trackNode(node) {
+        if (node) tracker.nodes.add(node);
+        return node;
+      },
+      cleanup() {
+        tracker.intervals.forEach((id) => { try { clearInterval(id); } catch (_) {} });
+        tracker.timeouts.forEach((id) => { try { clearTimeout(id); } catch (_) {} });
+        tracker.observers.forEach((observer) => { try { observer.disconnect(); } catch (_) {} });
+        tracker.listeners.forEach(({ target, type, handler, options }) => {
+          try { target.removeEventListener(type, handler, options); } catch (_) {}
+        });
+        tracker.nodes.forEach((node) => { try { node.remove(); } catch (_) {} });
+        tracker.intervals.clear();
+        tracker.timeouts.clear();
+        tracker.observers.clear();
+        tracker.listeners.length = 0;
+        tracker.nodes.clear();
+      }
+    };
+  };
+
+  const resources = createResourceTracker();
+  const nativeSetTimeout = window.setTimeout.bind(window);
+  const nativeSetInterval = window.setInterval.bind(window);
+  const setTimeout = (...args) => resources.trackTimeout(nativeSetTimeout(...args));
+  const setInterval = (...args) => resources.trackInterval(nativeSetInterval(...args));
+  const NativeMutationObserver = window.MutationObserver;
+  const MutationObserver = function(callback) {
+    const observer = new NativeMutationObserver(callback);
+    resources.trackObserver(observer);
+    return observer;
+  };
+  MutationObserver.prototype = NativeMutationObserver.prototype;
+  resources.trackListener(window, 'beforeunload', () => resources.cleanup());
 
   const css = `
     #${BUTTON_ID} {
@@ -269,6 +338,7 @@
     try { root.localStorage.setItem(key, value); } catch (_) {}
   };
 
+
   const createStorage = (adapterRef) => ({
     async get(key, fallback) {
       const adapter = adapterRef.current;
@@ -289,6 +359,11 @@
   // STATE MANAGEMENT
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Create the shared UI instance bound to a storage adapter.
+   * @param {{current: object|null}} storageAdapterRef Adapter reference.
+   * @returns {object} Shared UI instance.
+   */
   const createUi = (storageAdapterRef) => {
     injectStyle();
 
@@ -304,6 +379,10 @@
       collapsed: new Set() // Track collapsed tab IDs
     };
 
+
+    /**
+     * Ensure UI elements are attached and visible.
+     */
     const ensureVisible = () => {
       if (state.button) {
         if (!SAFE_DOC.body.contains(state.button)) {
@@ -327,6 +406,10 @@
       }
     };
 
+    /**
+     * Persist UI dock position.
+     * @param {string} pos Position value.
+     */
     const setPosition = async (pos) => {
       state.position = pos === 'left' ? 'left' : 'right';
       const btn = state.button;
@@ -343,6 +426,10 @@
       await storage.set(STORAGE_KEY_POSITION, state.position);
     };
 
+    /**
+     * Show a message in the main panel.
+     * @param {string} text Message to display.
+     */
     const showPanelMessage = (text) => {
       if (!state.panel) return;
       state.panel.innerHTML = '';
@@ -352,6 +439,9 @@
       state.panel.appendChild(empty);
     };
 
+    /**
+     * Render the script tab list.
+     */
     const renderTabs = () => {
       if (!state.tabs) return;
       const entries = Array.from(state.scripts.values());
@@ -404,6 +494,10 @@
       state.tabs.appendChild(fragment);
     };
 
+    /**
+     * Switch the active panel to the given script id.
+     * @param {string} id Script id.
+     */
     const switchPanel = async (id) => {
       state.activeId = id;
       writeLocal(STORAGE_KEY_ACTIVE, id);
@@ -427,6 +521,9 @@
       }
     };
 
+    /**
+     * Toggle the shared UI modal visibility.
+     */
     const toggleModal = () => {
       if (!state.modal) return;
       ensureVisible();
@@ -450,6 +547,9 @@
       }
     };
 
+    /**
+     * Build the UI button and modal chrome once.
+     */
     const buildChrome = () => {
       if (state.button && state.modal) return;
       const btn = SAFE_DOC.createElement('button');
@@ -458,7 +558,7 @@
       btn.textContent = '⋯';
       btn.setAttribute('aria-label', 'Open userscript controls');
       btn.setAttribute('aria-expanded', 'false');
-      btn.addEventListener(clickEvent, (ev) => {
+      resources.trackListener(btn, clickEvent, (ev) => {
         ev.preventDefault();
         toggleModal();
       });
@@ -474,7 +574,7 @@
       const posBtn = SAFE_DOC.createElement('button');
       posBtn.type = 'button';
       posBtn.textContent = 'Flip';
-      posBtn.addEventListener(clickEvent, (ev) => {
+      resources.trackListener(posBtn, clickEvent, (ev) => {
         ev.preventDefault();
         setPosition(state.position === 'right' ? 'left' : 'right');
       });
@@ -495,7 +595,7 @@
       state.tabs = tabs;
       state.panel = panel;
       ensureVisible();
-      tabs.addEventListener(clickEvent, (ev) => {
+      resources.trackListener(tabs, clickEvent, (ev) => {
         const target = ev.target.closest('.userscripts-tab');
         if (!target) return;
         const id = target.dataset.scriptId;
@@ -527,17 +627,27 @@
       });
     };
 
+    /**
+     * Load stored dock position and apply it.
+     */
     const ensurePosition = async () => {
       const storedGM = await storage.get(STORAGE_KEY_POSITION, null);
       const pos = storedGM || readLocal(STORAGE_KEY_POSITION, null) || DEFAULT_POSITION;
       await setPosition(pos);
     };
 
+    /**
+     * Load stored active panel id and apply it.
+     */
     const ensureActive = async () => {
       const storedGM = await storage.get(STORAGE_KEY_ACTIVE, null);
       state.activeId = storedGM || readLocal(STORAGE_KEY_ACTIVE, null) || null;
     };
 
+    /**
+     * Register a script panel with the shared UI.
+     * @param {object} scriptConfig Script registration details.
+     */
     const registerScript = (scriptConfig) => {
       const { id, title, render, enabled, onToggle } = scriptConfig;
       if (!id) throw new Error('id required');
@@ -554,6 +664,11 @@
       renderTabs();
     };
 
+    /**
+     * Update enabled state for a script.
+     * @param {string} id Script id.
+     * @param {boolean} value Enabled state.
+     */
     const setScriptEnabled = (id, value) => {
       const entry = state.scripts.get(id);
       if (!entry) return;
@@ -579,6 +694,9 @@
       }
     };
 
+    /**
+     * Initialize UI position, active panel, and tabs.
+     */
     const init = async () => {
       buildChrome();
       await ensurePosition();
@@ -661,7 +779,7 @@
         initSharedUi();
         
         if (typeof document !== 'undefined') {
-          document.addEventListener('userscriptSharedUiReady', (event) => {
+          resources.trackListener(document, 'userscriptSharedUiReady', (event) => {
             setTimeout(() => {
               const providedFactory = event?.detail?.sharedUi;
               if (!sharedUiReady) {
