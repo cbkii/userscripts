@@ -446,7 +446,6 @@
   const isXBrowserUA = /xbrowser|x\s*browser/i.test(navigator.userAgent || '');
   const IS_XBROWSER = isXBrowserScriptManager || isXBrowserUA;
   const DOWNLOAD_ANCHOR_DELAY_MS = 500;
-  const MOBILE_FALLBACK_DELAY_MS = 1200;
   const BLOB_STALE_MS = 10000;
   const BLOB_REVOKE_MS = 120000;
 
@@ -773,18 +772,10 @@
     }
     
     const cleanupDelay = gmDownloadAsync ? DOWNLOAD_ANCHOR_DELAY_MS : BLOB_REVOKE_MS;
-    let fallbackTimerId = null;
     let fallbackTriggered = false;
-    const clearFallbackTimer = () => {
-      if (fallbackTimerId !== null) {
-        clearTimeout(fallbackTimerId);
-        fallbackTimerId = null;
-      }
-    };
     const triggerFallback = (err) => {
       if (fallbackTriggered) return;
       fallbackTriggered = true;
-      clearFallbackTimer();
       resource.markStale();
       fallback(err);
     };
@@ -801,7 +792,6 @@
       ...(IS_XBROWSER ? { confirm: true } : {}),
       onload: () => {
         if (fallbackTriggered) return;
-        clearFallbackTimer();
         resource.cleanup(cleanupDelay);
       },
       onerror: (err) => {
@@ -809,16 +799,10 @@
       },
     };
     try {
-      if (isMobileBrowser) {
-        fallbackTimerId = setTimeout(() => {
-          triggerFallback(new Error('Mobile GM_download timeout'));
-        }, MOBILE_FALLBACK_DELAY_MS);
-      }
       const result = gmDownloadAsync ? gmDownloadAsync(detail) : gmDownloadLegacy(detail);
       if (result && typeof result.then === 'function') {
         const promise = result.then(() => {
           if (fallbackTriggered) return;
-          clearFallbackTimer();
           resource.cleanup(cleanupDelay);
         }).catch((err) => {
           triggerFallback(err);

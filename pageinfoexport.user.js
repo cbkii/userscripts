@@ -352,7 +352,6 @@
   };
 
   const DOWNLOAD_ANCHOR_DELAY_MS = 500;
-  const MOBILE_FALLBACK_DELAY_MS = 1200;
   const BLOB_STALE_MS = 10000;
   const BLOB_REVOKE_MS = 120000;
   const isMobileBrowser = typeof navigator !== 'undefined'
@@ -1157,7 +1156,6 @@
     }
     let fallbackResult = null;
     let resolveLegacy = null;
-    let resolveMobileFallback = null;
     let fallbackTriggered = false;
     let fallbackAttempted = false;
     let allowAutoFallback = true;
@@ -1165,11 +1163,6 @@
     const legacyCompletion = new Promise((resolve) => {
       resolveLegacy = resolve;
     });
-    const mobileFallback = isMobileBrowser
-      ? new Promise((resolve) => {
-        resolveMobileFallback = resolve;
-      })
-      : null;
     const handleError = async (err) => {
       if (fallbackTriggered) return;
       fallbackTriggered = true;
@@ -1218,14 +1211,6 @@
       };
     }
 
-    let fallbackTimerId = null;
-    const clearFallbackTimer = () => {
-      if (fallbackTimerId !== null) {
-        clearTimeout(fallbackTimerId);
-        fallbackTimerId = null;
-      }
-    };
-
     const downloadDetails = {
       url: downloadUrl,
       name: filename,
@@ -1233,12 +1218,7 @@
       ...(isMobileBrowser ? { confirm: false } : {}),
       ...(IS_XBROWSER ? { confirm: true } : {}),
       onload: () => {
-        clearFallbackTimer();
         if (fallbackTriggered) return;
-        if (resolveMobileFallback) {
-          resolveMobileFallback({ success: true });
-          resolveMobileFallback = null;
-        }
         resource.cleanup(cleanupDelay);
         if (resolveLegacy) {
           resolveLegacy({ success: true });
@@ -1246,43 +1226,17 @@
         }
       },
       onerror: (err) => {
-        clearFallbackTimer();
-        if (resolveMobileFallback) {
-          resolveMobileFallback({ success: false });
-          resolveMobileFallback = null;
-        }
         void handleError(err);
       },
     };
 
     try {
-      if (isMobileBrowser) {
-        fallbackTimerId = setTimeout(() => {
-          if (fallbackTriggered) return;
-          if (resolveMobileFallback) {
-            resolveMobileFallback({ success: false });
-            resolveMobileFallback = null;
-          }
-          allowAutoFallback = false;
-          lastError = new Error('Mobile GM_download timeout');
-        }, MOBILE_FALLBACK_DELAY_MS);
-      }
       const downloadPromise = GMX.download(downloadDetails);
       if (downloadPromise && typeof downloadPromise.then === 'function') {
         const promise = downloadPromise.then(() => {
-          clearFallbackTimer();
           if (fallbackTriggered) return;
           resource.cleanup(cleanupDelay);
-          if (resolveMobileFallback) {
-            resolveMobileFallback({ success: true });
-            resolveMobileFallback = null;
-          }
         }).catch((err) => {
-          clearFallbackTimer();
-          if (resolveMobileFallback) {
-            resolveMobileFallback({ success: false });
-            resolveMobileFallback = null;
-          }
           return handleError(err);
         });
         if (!isMobileBrowser) {
@@ -1295,10 +1249,6 @@
         if (!fallbackTriggered) {
           resource.cleanup(cleanupDelay);
         }
-      }
-      if (mobileFallback) {
-        await mobileFallback;
-        clearFallbackTimer();
       }
     } catch (err) {
       await handleError(err);
