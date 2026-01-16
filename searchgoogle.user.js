@@ -4,7 +4,7 @@
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTEiIGN5PSIxMSIgcj0iOCIvPjxwYXRoIGQ9Im0yMSAyMS00LjM1LTQuMzUiLz48L3N2Zz4=
 // @description  Google search helper with site filters, file-type filters, site exclusions, and smart dorks.
-// @version      2026.01.11.1505
+// @version      2026.01.16.1055
 // @match        *://www.google.*/search*
 // @match        *://google.*/search*
 // @exclude      *://www.google.*/imghp*
@@ -67,9 +67,6 @@
   const SCRIPT_TITLE = 'Google Expert Search';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
   const SELECTIONS_KEY = `${SCRIPT_ID}.selections`;
-  const MEMORY_LIMIT_MB_DEFAULT = 200;
-  const MEMORY_LIMIT_KEY = `${SCRIPT_ID}.memoryLimitMb`;
-  const MEMORY_CHECK_INTERVAL_MS = 5000;
 
   //////////////////////////////////////////////////////////////
   // FILTER DATA - Domain URLs, Extensions, Exclusions, and Dorks
@@ -374,9 +371,6 @@
     enabled: true,
     started: false,
     menuIds: [],
-    memoryLimitMb: MEMORY_LIMIT_MB_DEFAULT,
-    memoryIntervalId: null,
-    memoryTripped: false,
     selections: {
       sites: {},
       fileTypes: {},
@@ -454,40 +448,6 @@
     debug: DEBUG
   });
 
-  const getMemoryUsageMb = () => {
-    const mem = (typeof performance !== 'undefined' && performance && performance.memory) ? performance.memory : null;
-    if (!mem || typeof mem.usedJSHeapSize !== 'number') return null;
-    return mem.usedJSHeapSize / (1024 * 1024);
-  };
-
-  const stopForMemoryPressure = (usedMb) => {
-    if (state.memoryTripped) return;
-    state.memoryTripped = true;
-    if (state.memoryIntervalId) {
-      clearInterval(state.memoryIntervalId);
-      state.memoryIntervalId = null;
-    }
-    void setEnabled(false);
-    log('warn', `Memory limit exceeded (${usedMb.toFixed(1)} MB). Script disabled.`);
-  };
-
-  const startMemoryGuard = () => {
-    if (state.memoryIntervalId || !state.memoryLimitMb) return;
-    state.memoryIntervalId = setInterval(() => {
-      const usedMb = getMemoryUsageMb();
-      if (usedMb !== null && usedMb >= state.memoryLimitMb) {
-        stopForMemoryPressure(usedMb);
-      }
-    }, MEMORY_CHECK_INTERVAL_MS);
-  };
-
-  const setMemoryLimit = async (value) => {
-    const parsed = Number.parseFloat(value);
-    if (!Number.isFinite(parsed) || parsed <= 0) return;
-    state.memoryLimitMb = Math.max(50, Math.round(parsed));
-    await gmStore.set(MEMORY_LIMIT_KEY, state.memoryLimitMb);
-    registerMenu();
-  };
 
   //////////////////////////////////////////////////////////////
   // CORE LOGIC - SEARCH QUERY BUILDING
@@ -662,6 +622,10 @@
     log('debug', 'Selections loaded', state.selections);
   };
 
+  /**
+   * Render the shared UI panel for this script.
+   * @returns {HTMLDivElement} Panel root element.
+   */
   const renderPanel = () => {
     const panel = document.createElement('div');
     panel.style.cssText = 'padding: 12px; color: #e5e7eb; font-family: system-ui, sans-serif; font-size: 13px; max-height: 550px; overflow-y: auto;';
@@ -874,23 +838,6 @@
     helpText.appendChild(document.createTextNode('• Click "Search with Filters" to apply'));
     panel.appendChild(helpText);
 
-    const memoryNote = document.createElement('p');
-    memoryNote.textContent = `Memory guard limit: ${state.memoryLimitMb} MB`;
-    memoryNote.style.margin = '10px 0 0 0';
-    memoryNote.style.fontSize = '11px';
-    memoryNote.style.color = '#94a3b8';
-    panel.appendChild(memoryNote);
-
-    const memoryBtn = document.createElement('button');
-    memoryBtn.type = 'button';
-    memoryBtn.textContent = 'Set memory limit';
-    memoryBtn.style.cssText = 'margin-top: 6px; padding: 8px 12px; background: #1f2937; color: #f8fafc; border: 1px solid rgba(255,255,255,0.18); border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;';
-    memoryBtn.addEventListener('click', () => {
-      const next = prompt('Set memory limit in MB (minimum 50):', String(state.memoryLimitMb));
-      if (next !== null) setMemoryLimit(next);
-    });
-    panel.appendChild(memoryBtn);
-
     return panel;
   };
 
@@ -898,6 +845,9 @@
   // STATE MANAGEMENT
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Register Tampermonkey menu commands.
+   */
   const registerMenu = () => {
     if (typeof GM_registerMenuCommand !== 'function') return;
     if (hasUnregister && state.menuIds.length) {
@@ -910,13 +860,6 @@
     state.menuIds.push(GM_registerMenuCommand(
       `[Google Search] ${state.enabled ? '✓' : '✗'} Enable`,
       async () => { await setEnabled(!state.enabled); }
-    ));
-    state.menuIds.push(GM_registerMenuCommand(
-      `[Google Search] 🧠 Memory limit (${state.memoryLimitMb} MB)`,
-      () => {
-        const next = prompt('Set memory limit in MB (minimum 50):', String(state.memoryLimitMb));
-        if (next !== null) setMemoryLimit(next);
-      }
     ));
     if (state.enabled) {
       state.menuIds.push(GM_registerMenuCommand('[Google Search] 🔍 Open Filter Panel', () => {
@@ -933,18 +876,30 @@
     }
   };
 
+  /**
+   * Stop script activity.
+   * @returns {Promise<void>}
+   */
   const stop = async () => {
     state.started = false;
   };
 
+  /**
+   * Start script activity if not already started.
+   * @returns {Promise<void>}
+   */
   const start = async () => {
     if (state.started) return;
     state.started = true;
-    startMemoryGuard();
     await loadSelections();
     log('info', 'Google Expert Search ready');
   };
 
+  /**
+   * Enable or disable the script.
+   * @param {boolean} value Desired enabled state.
+   * @returns {Promise<void>}
+   */
   const setEnabled = async (value) => {
     state.enabled = !!value;
     await gmStore.set(ENABLE_KEY, state.enabled);
@@ -963,9 +918,12 @@
   // INITIALIZATION
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Initialize state, UI registration, and startup behavior.
+   * @returns {Promise<void>}
+   */
   const initToggle = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
-    state.memoryLimitMb = await gmStore.get(MEMORY_LIMIT_KEY, MEMORY_LIMIT_MB_DEFAULT);
     await loadSelections();
 
     if (sharedUi && !registrationAttempted) {

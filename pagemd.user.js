@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Easy Web Page to Markdown
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.11.1505
+// @version      2026.01.16.1055
 // @description  Extracts the main article content and saves it as clean Markdown with a single click.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE0IDJINmEyIDIgMCAwIDAtMiAydjE2YTIgMiAwIDAgMCAyIDJoMTJhMiAyIDAgMCAwIDItMlY4eiIvPjxwb2x5bGluZSBwb2ludHM9IjE0IDIgMTQgOCAyMCA4Ii8+PHBhdGggZD0iTTEwIDEzaDQiLz48cGF0aCBkPSJNMTAgMTdoNCIvPjxwYXRoIGQ9Ik0xMCA5aDIiLz48L3N2Zz4=
@@ -58,9 +58,6 @@
   const SCRIPT_TITLE = 'Page ➜ Markdown';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
   const ALWAYS_RUN_KEY = `${SCRIPT_ID}.alwaysRun`;
-  const MEMORY_LIMIT_MB_DEFAULT = 200;
-  const MEMORY_LIMIT_KEY = `${SCRIPT_ID}.memoryLimitMb`;
-  const MEMORY_CHECK_INTERVAL_MS = 5000;
   const DEFAULT_FILENAME = 'page.md';
   const POST_IDLE_DELAY_MS = 350;
   const MAX_DATA_URL_FILE_SIZE_BYTES = 2097152; // 2MB - max file size for data URL conversion on mobile
@@ -143,40 +140,6 @@
   const logError = (msg, meta) => logger('error', msg, meta);
   const logDebug = (msg, meta) => logger('debug', msg, meta);
 
-  const getMemoryUsageMb = () => {
-    const mem = (typeof performance !== 'undefined' && performance && performance.memory) ? performance.memory : null;
-    if (!mem || typeof mem.usedJSHeapSize !== 'number') return null;
-    return mem.usedJSHeapSize / (1024 * 1024);
-  };
-
-  const stopForMemoryPressure = (usedMb) => {
-    if (state.memoryTripped) return;
-    state.memoryTripped = true;
-    if (state.memoryIntervalId) {
-      clearInterval(state.memoryIntervalId);
-      state.memoryIntervalId = null;
-    }
-    void setEnabled(false);
-    logWarn(`Memory limit exceeded (${usedMb.toFixed(1)} MB). Script disabled.`);
-  };
-
-  const startMemoryGuard = () => {
-    if (state.memoryIntervalId || !state.memoryLimitMb) return;
-    state.memoryIntervalId = setInterval(() => {
-      const usedMb = getMemoryUsageMb();
-      if (usedMb !== null && usedMb >= state.memoryLimitMb) {
-        stopForMemoryPressure(usedMb);
-      }
-    }, MEMORY_CHECK_INTERVAL_MS);
-  };
-
-  const setMemoryLimit = async (value) => {
-    const parsed = Number.parseFloat(value);
-    if (!Number.isFinite(parsed) || parsed <= 0) return;
-    state.memoryLimitMb = Math.max(50, Math.round(parsed));
-    await gmStore.set(MEMORY_LIMIT_KEY, state.memoryLimitMb);
-    registerMenu();
-  };
 
   //////////////////////////////////////////////////////////////
   // THIRD-PARTY LIBRARY CONFIGURATION
@@ -1056,10 +1019,7 @@
     enabled: true,
     started: false,
     alwaysRun: false,
-    menuIds: [],
-    memoryLimitMb: MEMORY_LIMIT_MB_DEFAULT,
-    memoryIntervalId: null,
-    memoryTripped: false
+    menuIds: []
   };
 
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
@@ -1140,6 +1100,10 @@
     }
   };
 
+  /**
+   * Render the shared UI panel for this script.
+   * @returns {HTMLDivElement} Panel root element.
+   */
   const renderPanel = () => {
     const wrapper = document.createElement('div');
     wrapper.style.display = 'flex';
@@ -1208,29 +1172,6 @@
     buttonsRow.appendChild(makeButton('📋 Copy to Clipboard', { aggressiveClutter: true }, handleCopyToClipboard));
     wrapper.appendChild(buttonsRow);
 
-    const memoryNote = document.createElement('p');
-    memoryNote.textContent = `Memory guard limit: ${state.memoryLimitMb} MB`;
-    memoryNote.style.margin = '6px 0 0 0';
-    memoryNote.style.fontSize = '12px';
-    memoryNote.style.color = '#94a3b8';
-    wrapper.appendChild(memoryNote);
-
-    const memoryBtn = document.createElement('button');
-    memoryBtn.type = 'button';
-    memoryBtn.textContent = 'Set memory limit';
-    memoryBtn.style.padding = '8px 12px';
-    memoryBtn.style.borderRadius = '6px';
-    memoryBtn.style.border = '1px solid rgba(255,255,255,0.18)';
-    memoryBtn.style.background = '#1f2937';
-    memoryBtn.style.color = '#f8fafc';
-    memoryBtn.style.cursor = 'pointer';
-    memoryBtn.style.fontSize = '13px';
-    memoryBtn.addEventListener('click', () => {
-      const next = prompt('Set memory limit in MB (minimum 50):', String(state.memoryLimitMb));
-      if (next !== null) setMemoryLimit(next);
-    });
-    wrapper.appendChild(memoryBtn);
-
     return wrapper;
   };
 
@@ -1238,20 +1179,31 @@
   // STATE MANAGEMENT
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Tear down injected UI artifacts.
+   */
   const teardown = () => {
     state.started = false;
     const toast = document.getElementById('pagemd-toast');
     if (toast) toast.remove();
   };
 
+  /**
+   * Start the script state.
+   * @returns {Promise<void>}
+   */
   const start = async () => {
     if (state.started) return;
     state.started = true;
-    startMemoryGuard();
     try { GM_addStyle(TOAST_STYLES); } catch (_) {}
     logInfo('Userscript ready');
   };
 
+  /**
+   * Enable or disable the script.
+   * @param {boolean} value Desired enabled state.
+   * @returns {Promise<void>}
+   */
   const setEnabled = async (value) => {
     state.enabled = value;
     await gmStore.set(ENABLE_KEY, state.enabled);
@@ -1266,6 +1218,9 @@
     registerMenu();
   };
 
+  /**
+   * Register Tampermonkey menu commands.
+   */
   const registerMenu = () => {
     if (typeof GM_registerMenuCommand !== 'function') return;
     if (hasUnregister && state.menuIds.length) {
@@ -1281,13 +1236,6 @@
     state.menuIds.push(GM_registerMenuCommand(
       `[Page→MD] ↻ Always Run (${state.alwaysRun ? 'ON' : 'OFF'})`,
       async () => { await setAlwaysRun(!state.alwaysRun); }
-    ));
-    state.menuIds.push(GM_registerMenuCommand(
-      `[Page→MD] 🧠 Memory limit (${state.memoryLimitMb} MB)`,
-      () => {
-        const next = prompt('Set memory limit in MB (minimum 50):', String(state.memoryLimitMb));
-        if (next !== null) setMemoryLimit(next);
-      }
     ));
     if (state.enabled) {
       state.menuIds.push(GM_registerMenuCommand('[Page→MD] ⬇ Convert (with cleanup)', () => handleConvert({ aggressiveClutter: true })));
@@ -1310,10 +1258,13 @@
   // INITIALIZATION
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Initialize state, UI registration, and startup behavior.
+   * @returns {Promise<void>}
+   */
   const init = async () => {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
     state.alwaysRun = await gmStore.get(ALWAYS_RUN_KEY, false);
-    state.memoryLimitMb = await gmStore.get(MEMORY_LIMIT_KEY, MEMORY_LIMIT_MB_DEFAULT);
     
     if (sharedUi && !registrationAttempted) {
       registrationAttempted = true;

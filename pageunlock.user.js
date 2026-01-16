@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Page Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.11.1505
+// @version      2026.01.16.1055
 // @description  Unlock text selection, copy/paste, and context menu on restrictive sites. Optional overlay buster + aggressive mode. Lightweight + SPA-friendly.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHJlY3QgeD0iMyIgeT0iMTEiIHdpZHRoPSIxOCIgaGVpZ2h0PSIxMSIgcng9IjIiIHJ5PSIyIi8+PHBhdGggZD0iTTcgMTFWN2E1IDUgMCAwIDEgOS45LTEiLz48L3N2Zz4=
@@ -55,9 +55,6 @@
   const SCRIPT_TITLE = 'Page Unlocker';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
   const ALWAYS_RUN_KEY = `${SCRIPT_ID}.alwaysRun`;
-  const MEMORY_LIMIT_MB_DEFAULT = 200;
-  const MEMORY_LIMIT_KEY = `${SCRIPT_ID}.memoryLimitMb`;
-  const MEMORY_CHECK_INTERVAL_MS = 5000;
 
   const DEBUG = false;
   const LOG_PREFIX = '[pgunlock]';
@@ -72,7 +69,6 @@
     disabledHosts: [],          // per-host disable list
     hotkey: { alt: true, shift: true, code: 'KeyU' }, // Alt+Shift+U
     alwaysRun: false,           // dormant by default: only run automatically when enabled
-    memoryLimitMb: MEMORY_LIMIT_MB_DEFAULT,
   };
 
   //////////////////////////////////////////////////////////////
@@ -101,6 +97,11 @@
   };
 
 
+  /**
+   * Normalize persisted configuration with defaults.
+   * @param {object|null|undefined} input Raw config object.
+   * @returns {object} Normalized config.
+   */
   function normaliseCfg(input) {
     const cfg = Object.assign({}, DEFAULT_CFG, (input && typeof input === 'object') ? input : {});
     if (!Array.isArray(cfg.disabledHosts)) cfg.disabledHosts = [];
@@ -114,8 +115,6 @@
   const state = {
     menuIds: [],
     observers: [], // Track MutationObservers for cleanup
-    memoryIntervalId: null,
-    memoryTripped: false,
   };
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
   const MENU_PREFIX = '[Unlock]';
@@ -125,6 +124,10 @@
   let sharedUiReady = false;
   let registrationAttempted = false;
 
+  /**
+   * Register with the shared UI if available.
+   * @param {Function|undefined} tryRegister Shared UI helper callback.
+   */
   function attemptSharedUiRegistration(tryRegister) {
     if (registrationAttempted) return;
     if (typeof tryRegister === 'function') {
@@ -272,6 +275,10 @@
   // SHARED UI + MENU
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Toggle script enabled state and reload.
+   * @param {boolean} next Next enabled state.
+   */
   function setEnabled(next) {
     cfg.enabled = !!next;
     gmSet(STORAGE_KEY, cfg);
@@ -284,6 +291,9 @@
     location.reload();
   }
 
+  /**
+   * Disconnect tracked MutationObservers.
+   */
   function disconnectObservers() {
     // Disconnect all tracked MutationObservers
     if (state.observers && state.observers.length > 0) {
@@ -296,6 +306,10 @@
     }
   }
 
+  /**
+   * Toggle Always Run and reload.
+   * @param {boolean} next Next Always Run state.
+   */
   function setAlwaysRun(next) {
     cfg.alwaysRun = !!next;
     gmSet(STORAGE_KEY, cfg);
@@ -303,14 +317,11 @@
     location.reload();
   }
 
-  function setMemoryLimit(next) {
-    const parsed = Number.parseFloat(next);
-    if (!Number.isFinite(parsed) || parsed <= 0) return;
-    cfg.memoryLimitMb = Math.max(50, Math.round(parsed));
-    gmSet(STORAGE_KEY, cfg);
-    registerMenu();
-  }
 
+  /**
+   * Enable or disable on current host and reload.
+   * @param {boolean} enable Whether to enable on this host.
+   */
   function toggleSite(enable) {
     const nextEnabled = typeof enable === 'boolean' ? enable : isHostDisabled;
     const set = new Set(cfg.disabledHosts);
@@ -327,6 +338,10 @@
     location.reload();
   }
 
+  /**
+   * Toggle aggressive mode and reload.
+   * @param {boolean} next Desired aggressive state.
+   */
   function toggleAggressive(next) {
     cfg.aggressive = typeof next === 'boolean' ? next : !cfg.aggressive;
     gmSet(STORAGE_KEY, cfg);
@@ -334,6 +349,10 @@
     location.reload();
   }
 
+  /**
+   * Toggle overlay buster and reload.
+   * @param {boolean} next Desired overlay buster state.
+   */
   function toggleOverlayBuster(next) {
     cfg.overlayBuster = typeof next === 'boolean' ? next : !cfg.overlayBuster;
     gmSet(STORAGE_KEY, cfg);
@@ -341,6 +360,10 @@
     location.reload();
   }
 
+  /**
+   * Toggle copy tail cleaner and reload.
+   * @param {boolean} next Desired copy tail cleaner state.
+   */
   function toggleCopyTail(next) {
     cfg.cleanCopyTail = typeof next === 'boolean' ? next : !cfg.cleanCopyTail;
     gmSet(STORAGE_KEY, cfg);
@@ -348,6 +371,10 @@
     location.reload();
   }
 
+  /**
+   * Toggle key event interception and reload.
+   * @param {boolean} next Desired key interception state.
+   */
   function toggleInterceptKeys(next) {
     cfg.interceptKeys = typeof next === 'boolean' ? next : !cfg.interceptKeys;
     gmSet(STORAGE_KEY, cfg);
@@ -355,6 +382,9 @@
     location.reload();
   }
 
+  /**
+   * Execute a manual unlock and notify.
+   */
   function runForceUnlock() {
     try {
       forceUnlockNow();
@@ -365,11 +395,17 @@
     }
   }
 
+  /**
+   * Reset stored settings and reload.
+   */
   function resetSettings() {
     gmDel(STORAGE_KEY);
     location.reload();
   }
 
+  /**
+   * Register Tampermonkey menu commands.
+   */
   function registerMenu() {
     if (typeof GM_registerMenuCommand !== 'function') return;
     if (hasUnregister && state.menuIds.length) {
@@ -414,15 +450,12 @@
       `${MENU_PREFIX} 🗑 Reset settings`,
       () => resetSettings()
     ));
-    state.menuIds.push(GM_registerMenuCommand(
-      `${MENU_PREFIX} 🧠 Memory limit (${cfg.memoryLimitMb} MB)`,
-      () => {
-        const next = prompt('Set memory limit in MB (minimum 50):', String(cfg.memoryLimitMb));
-        if (next !== null) setMemoryLimit(next);
-      }
-    ));
   }
 
+  /**
+   * Render the shared UI panel for this script.
+   * @returns {HTMLDivElement} Panel root element.
+   */
   function renderPanel() {
     const panel = document.createElement('div');
     panel.style.cssText = 'padding: 12px; color: #e5e7eb; font-family: system-ui, sans-serif; font-size: 13px;';
@@ -475,14 +508,6 @@
     panel.appendChild(createToggle('🧹 Overlay buster (remove blockers)', cfg.overlayBuster, (val) => toggleOverlayBuster(val)));
     panel.appendChild(createToggle('✂️ Copy tail cleaner (strip attribution)', cfg.cleanCopyTail, (val) => toggleCopyTail(val)));
     panel.appendChild(createToggle('⌨️ Key event stopper (intercepts keys)', cfg.interceptKeys, (val) => toggleInterceptKeys(val)));
-    const memoryNote = document.createElement('p');
-    memoryNote.textContent = `Memory guard limit: ${cfg.memoryLimitMb} MB`;
-    memoryNote.style.cssText = 'margin: 10px 0 6px 0; font-size: 12px; color: #94a3b8;';
-    panel.appendChild(memoryNote);
-    panel.appendChild(createButton('🧠 Set memory limit', () => {
-      const next = prompt('Set memory limit in MB (minimum 50):', String(cfg.memoryLimitMb));
-      if (next !== null) setMemoryLimit(next);
-    }));
     const sep = document.createElement('hr');
     sep.style.cssText = 'border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 14px 0;';
     panel.appendChild(sep);
@@ -501,32 +526,6 @@
   // Dormant by default: only run automatically if Always Run is enabled
   if (!cfg.enabled || isHostDisabled || !cfg.alwaysRun) return;
 
-  function getMemoryUsageMb() {
-    const mem = (typeof performance !== 'undefined' && performance && performance.memory) ? performance.memory : null;
-    if (!mem || typeof mem.usedJSHeapSize !== 'number') return null;
-    return mem.usedJSHeapSize / (1024 * 1024);
-  }
-
-  function stopForMemoryPressure(usedMb) {
-    if (state.memoryTripped) return;
-    state.memoryTripped = true;
-    cfg.enabled = false;
-    gmSet(STORAGE_KEY, cfg);
-    registerMenu();
-    disconnectObservers();
-    try { gmNotify(`Page Unlocker disabled: memory ${usedMb.toFixed(1)} MB exceeded limit.`); } catch (_) {}
-    try { location.reload(); } catch (_) {}
-  }
-
-  function startMemoryGuard() {
-    if (state.memoryIntervalId || !cfg.memoryLimitMb) return;
-    state.memoryIntervalId = setInterval(() => {
-      const usedMb = getMemoryUsageMb();
-      if (usedMb !== null && usedMb >= cfg.memoryLimitMb) {
-        stopForMemoryPressure(usedMb);
-      }
-    }, MEMORY_CHECK_INTERVAL_MS);
-  }
 
   // --- Core behaviour ---
   const EVENT_BASE = [
@@ -566,6 +565,9 @@
   let styleEl = null;
   let styleEnsureScheduled = false;
 
+  /**
+   * Ensure the unlock CSS is appended last in head.
+   */
   function ensureStyleLast() {
     try {
       if (!styleEl) styleEl = document.getElementById(STYLE_ID);
@@ -587,6 +589,9 @@
     } catch (_) {}
   }
 
+  /**
+   * Debounce style reinsertion using RAF/timeout.
+   */
   function scheduleEnsureStyleLast() {
     if (styleEnsureScheduled) return;
     styleEnsureScheduled = true;
@@ -601,6 +606,9 @@
     }
   }
 
+  /**
+   * Remove top-level DOM0 event handlers that block interactions.
+   */
   function clearTopLevelDom0Handlers() {
     const targets = [document, document.documentElement, document.body].filter(Boolean);
     const props = [
@@ -618,11 +626,19 @@
     }
   }
 
+  /**
+   * Stop event propagation for restrictive handlers.
+   * @param {Event} e Event to stop.
+   */
   function stopPropagationEarly(e) {
     // Don’t call preventDefault here; we want native behaviour.
     e.stopImmediatePropagation();
   }
 
+  /**
+   * Install capture-phase event stoppers.
+   * @param {string[]} types Event types to intercept.
+   */
   function installEventStoppers(types) {
     for (const type of types) {
       document.addEventListener(type, stopPropagationEarly, true);
@@ -631,6 +647,10 @@
   }
 
   // Optional copy-tail cleaner.
+  /**
+   * Capture copy events and clean attribution tails.
+   * @param {ClipboardEvent} e Copy event.
+   */
   function onCopyCapture(e) {
     if (!cfg.cleanCopyTail) return;
     try {
@@ -650,12 +670,19 @@
     } catch (_) {}
   }
 
+  /**
+   * Install copy cleaner event listener when enabled.
+   */
   function installCopyCleaner() {
     if (!cfg.cleanCopyTail) return;
     document.addEventListener('copy', onCopyCapture, true);
   }
 
   // --- Aggressive mode: patch page context to ignore event hooks for our blocked event types ---
+  /**
+   * Inject page-context event patches for blocked event types.
+   * @param {string[]} blockedTypes Event types to block.
+   */
   function injectAggressivePatch(blockedTypes) {
     try {
       if (window[PATCH_FLAG]) return;
@@ -714,6 +741,9 @@
   // --- Overlay buster ---
   const overlaySeen = new WeakSet();
 
+  /**
+   * Restore scrollability on root elements.
+   */
   function restoreScroll() {
     const targets = [document.documentElement, document.body].filter(Boolean);
     for (const t of targets) {
@@ -726,6 +756,11 @@
     }
   }
 
+  /**
+   * Determine if a node looks like a blocking overlay.
+   * @param {Element} el Candidate element.
+   * @returns {boolean} True when overlay heuristics match.
+   */
   function isLikelyFullscreenOverlay(el) {
     try {
       if (!el || el.nodeType !== 1) return false;
@@ -761,6 +796,10 @@
     }
   }
 
+  /**
+   * Remove or hide an overlay element.
+   * @param {Element} el Overlay element.
+   */
   function removeOverlay(el) {
     try {
       overlaySeen.add(el);
@@ -773,6 +812,10 @@
     } catch (_) {}
   }
 
+  /**
+   * Scan a subtree for likely overlays and remove them.
+   * @param {Element|Node} root Root node to scan.
+   */
   function scanNodeForOverlays(root) {
     if (!cfg.overlayBuster) return;
     if (!root) return;
@@ -801,6 +844,9 @@
     }
   }
 
+  /**
+   * Run manual unlock operations immediately.
+   */
   function forceUnlockNow() {
     ensureStyleLast();
     clearTopLevelDom0Handlers();
@@ -817,6 +863,9 @@
   }
 
   // --- SPA navigation: re-apply on history changes ---
+  /**
+   * Hook SPA navigation to re-apply unlock steps.
+   */
   function hookHistory() {
     try {
       const wrap = (fnName) => {
@@ -841,6 +890,9 @@
   }
 
   // --- Observers ---
+  /**
+   * Install MutationObservers for style and overlay handling.
+   */
   function installObservers() {
     // 1) Keep our style last if the site injects later CSS.
     const headWatcher = new MutationObserver(() => scheduleEnsureStyleLast());
@@ -953,6 +1005,9 @@
   }
 
   // --- Hotkey ---
+  /**
+   * Install the hotkey listener for manual unlock.
+   */
   function installHotkey() {
     const hk = cfg.hotkey || DEFAULT_CFG.hotkey;
     document.addEventListener('keydown', (e) => {
@@ -985,5 +1040,4 @@
   installObservers();
   hookHistory();
   installHotkey();
-  startMemoryGuard();
 })();

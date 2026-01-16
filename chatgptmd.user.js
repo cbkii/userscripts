@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.11.1505
+// @version      2026.01.16.1055
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions. UI integrated with shared userscript panel.
 // @author       cbcoz
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTIxIDE1djRhMiAyIDAgMCAxLTIgMkg1YTIgMiAwIDAgMS0yLTJ2LTQiLz48cG9seWxpbmUgcG9pbnRzPSI3IDEwIDEyIDE1IDE3IDEwIi8+PGxpbmUgeDE9IjEyIiB5MT0iMTUiIHgyPSIxMiIgeTI9IjMiLz48L3N2Zz4=
@@ -65,9 +65,6 @@
   const SCRIPT_ID = 'chatgptmd';
   const SCRIPT_TITLE = 'ChatGPT Exporter';
   const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
-  const MEMORY_LIMIT_MB_DEFAULT = 200;
-  const MEMORY_LIMIT_KEY = `${SCRIPT_ID}.memoryLimitMb`;
-  const MEMORY_CHECK_INTERVAL_MS = 5000;
   const gmDownloadLegacy = typeof GM_download === 'function' ? GM_download : null;
   const gmDownloadAsync = typeof GM !== 'undefined' && GM && typeof GM.download === 'function'
     ? GM.download.bind(GM)
@@ -230,10 +227,7 @@
   const state = {
     enabled: true,
     started: false,
-    menuIds: [],
-    memoryLimitMb: MEMORY_LIMIT_MB_DEFAULT,
-    memoryIntervalId: null,
-    memoryTripped: false
+    menuIds: []
   };
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
 
@@ -304,40 +298,6 @@
     debug: DEBUG
   });
 
-  const getMemoryUsageMb = () => {
-    const mem = (typeof performance !== 'undefined' && performance && performance.memory) ? performance.memory : null;
-    if (!mem || typeof mem.usedJSHeapSize !== 'number') return null;
-    return mem.usedJSHeapSize / (1024 * 1024);
-  };
-
-  const stopForMemoryPressure = (usedMb) => {
-    if (state.memoryTripped) return;
-    state.memoryTripped = true;
-    if (state.memoryIntervalId) {
-      clearInterval(state.memoryIntervalId);
-      state.memoryIntervalId = null;
-    }
-    void setEnabled(false);
-    log('warn', `Memory limit exceeded (${usedMb.toFixed(1)} MB). Script disabled.`);
-  };
-
-  const startMemoryGuard = () => {
-    if (state.memoryIntervalId || !state.memoryLimitMb) return;
-    state.memoryIntervalId = setInterval(() => {
-      const usedMb = getMemoryUsageMb();
-      if (usedMb !== null && usedMb >= state.memoryLimitMb) {
-        stopForMemoryPressure(usedMb);
-      }
-    }, MEMORY_CHECK_INTERVAL_MS);
-  };
-
-  const setMemoryLimit = async (value) => {
-    const parsed = Number.parseFloat(value);
-    if (!Number.isFinite(parsed) || parsed <= 0) return;
-    state.memoryLimitMb = Math.max(50, Math.round(parsed));
-    await gmStore.set(MEMORY_LIMIT_KEY, state.memoryLimitMb);
-    registerMenu();
-  };
 
   //////////////////////////////////////////////////////////////
   // CORE LOGIC - CHATGPT EXPORT
@@ -346,13 +306,20 @@
   // Note: Legacy standalone UI has been removed. This script now requires
   // userscriptui.user.js to be installed. All UI is contained in the shared panel.
   
+  /**
+   * Start script state (UI only).
+   * @returns {Promise<void>}
+   */
   const start = async () => {
     if (state.started) return;
     state.started = true;
-    startMemoryGuard();
     log('debug', 'Script started');
   };
 
+  /**
+   * Stop script state.
+   * @returns {Promise<void>}
+   */
   const stop = async () => {
     if (!state.started) return;
     state.started = false;
@@ -363,6 +330,9 @@
   // STATE MANAGEMENT
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Register Tampermonkey menu commands.
+   */
   const registerMenu = () => {
     if (typeof GM_registerMenuCommand !== 'function') return;
     if (hasUnregister && state.menuIds.length) {
@@ -375,18 +345,16 @@
       `[ChatGPT Export] ${state.enabled ? '✓' : '✗'} Enable`,
       async () => { await setEnabled(!state.enabled); }
     ));
-    state.menuIds.push(GM_registerMenuCommand(
-      `[ChatGPT Export] 🧠 Memory limit (${state.memoryLimitMb} MB)`,
-      () => {
-        const next = prompt('Set memory limit in MB (minimum 50):', String(state.memoryLimitMb));
-        if (next !== null) setMemoryLimit(next);
-      }
-    ));
     if (state.enabled) {
       state.menuIds.push(GM_registerMenuCommand('[ChatGPT Export] ⬇ Quick export (.md)', () => exportChat({ format: 'md', action: 'download' })));
     }
   };
 
+  /**
+   * Enable or disable the script.
+   * @param {boolean} value Desired enabled state.
+   * @returns {Promise<void>}
+   */
   const setEnabled = async (value) => {
     state.enabled = !!value;
     await gmStore.set(ENABLE_KEY, state.enabled);
@@ -405,6 +373,10 @@
   // UI COMPONENTS
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Render the shared UI panel for this script.
+   * @returns {HTMLDivElement} Panel root element.
+   */
   const renderPanel = () => {
     const wrapper = document.createElement('div');
     wrapper.style.display = 'flex';
@@ -444,28 +416,6 @@
     buttonGroup.appendChild(buildActionRow('JSON (.json)', 'json'));
     wrapper.appendChild(buttonGroup);
 
-    const memoryNote = document.createElement('p');
-    memoryNote.textContent = `Memory guard limit: ${state.memoryLimitMb} MB`;
-    memoryNote.style.margin = '6px 0 0 0';
-    memoryNote.style.fontSize = '12px';
-    memoryNote.style.color = '#94a3b8';
-    wrapper.appendChild(memoryNote);
-
-    const memoryBtn = document.createElement('button');
-    memoryBtn.type = 'button';
-    memoryBtn.textContent = 'Set memory limit';
-    memoryBtn.style.padding = '8px 12px';
-    memoryBtn.style.borderRadius = '6px';
-    memoryBtn.style.border = '1px solid rgba(255,255,255,0.18)';
-    memoryBtn.style.background = '#1f2937';
-    memoryBtn.style.color = '#f8fafc';
-    memoryBtn.style.cursor = 'pointer';
-    memoryBtn.style.fontSize = '13px';
-    memoryBtn.addEventListener('click', () => {
-      const next = prompt('Set memory limit in MB (minimum 50):', String(state.memoryLimitMb));
-      if (next !== null) setMemoryLimit(next);
-    });
-    wrapper.appendChild(memoryBtn);
 
     return wrapper;
   };
@@ -474,9 +424,12 @@
   // INITIALIZATION
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Initialize state, UI registration, and enablement.
+   * @returns {Promise<void>}
+   */
   async function main() {
     state.enabled = await gmStore.get(ENABLE_KEY, true);
-    state.memoryLimitMb = await gmStore.get(MEMORY_LIMIT_KEY, MEMORY_LIMIT_MB_DEFAULT);
 
     if (sharedUi && !registrationAttempted) {
       registrationAttempted = true;

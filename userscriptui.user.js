@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Userscript Shared UI Manager
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.11.1505
+// @version      2026.01.16.1055
 // @description  Provides a shared hotpink dock + dark modal with per-script tabs, toggles, and persistent layout for all userscripts.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHJlY3QgeD0iMyIgeT0iMyIgd2lkdGg9IjciIGhlaWdodD0iNyIvPjxyZWN0IHg9IjE0IiB5PSIzIiB3aWR0aD0iNyIgaGVpZ2h0PSI3Ii8+PHJlY3QgeD0iMTQiIHk9IjE0IiB3aWR0aD0iNyIgaGVpZ2h0PSI3Ii8+PHJlY3QgeD0iMyIgeT0iMTQiIHdpZHRoPSI3IiBoZWlnaHQ9IjciLz48L3N2Zz4=
@@ -62,10 +62,6 @@
   const TABLIST_ID = `${UI_PREFIX}-tabs`;
   const PANEL_ID = `${UI_PREFIX}-panel`;
   const STYLE_ID = `${UI_PREFIX}-style`;
-  const SCRIPT_ID = 'userscriptui';
-  const MEMORY_LIMIT_MB_DEFAULT = 200;
-  const MEMORY_LIMIT_KEY = `${SCRIPT_ID}.memoryLimitMb`;
-  const MEMORY_CHECK_INTERVAL_MS = 5000;
 
   //////////////////////////////////////////////////////////////
   // UTILITIES & HELPERS
@@ -273,14 +269,6 @@
     try { root.localStorage.setItem(key, value); } catch (_) {}
   };
 
-  const uiStore = {
-    async get(key, fallback) {
-      try { return await GM_getValue(key, fallback); } catch (_) { return fallback; }
-    },
-    async set(key, value) {
-      try { await GM_setValue(key, value); } catch (_) {}
-    }
-  };
 
   const createStorage = (adapterRef) => ({
     async get(key, fallback) {
@@ -302,6 +290,11 @@
   // STATE MANAGEMENT
   //////////////////////////////////////////////////////////////
 
+  /**
+   * Create the shared UI instance bound to a storage adapter.
+   * @param {{current: object|null}} storageAdapterRef Adapter reference.
+   * @returns {object} Shared UI instance.
+   */
   const createUi = (storageAdapterRef) => {
     injectStyle();
 
@@ -314,51 +307,13 @@
       position: DEFAULT_POSITION,
       activeId: null,
       scripts: new Map(),
-      collapsed: new Set(), // Track collapsed tab IDs
-      memoryLimitMb: MEMORY_LIMIT_MB_DEFAULT,
-      memoryIntervalId: null,
-      memoryTripped: false,
-      memoryButton: null
+      collapsed: new Set() // Track collapsed tab IDs
     };
 
-    const getMemoryUsageMb = () => {
-      const mem = (typeof performance !== 'undefined' && performance && performance.memory) ? performance.memory : null;
-      if (!mem || typeof mem.usedJSHeapSize !== 'number') return null;
-      return mem.usedJSHeapSize / (1024 * 1024);
-    };
 
-    const stopForMemoryPressure = (usedMb) => {
-      if (state.memoryTripped) return;
-      state.memoryTripped = true;
-      if (state.memoryIntervalId) {
-        clearInterval(state.memoryIntervalId);
-        state.memoryIntervalId = null;
-      }
-      if (state.modal) {
-        state.modal.classList.remove('open');
-      }
-      if (state.panel) {
-        state.panel.textContent = `Userscript UI paused due to high memory usage (${usedMb.toFixed(1)} MB).`;
-      }
-    };
-
-    const startMemoryGuard = () => {
-      if (state.memoryIntervalId || !state.memoryLimitMb) return;
-      state.memoryIntervalId = setInterval(() => {
-        const usedMb = getMemoryUsageMb();
-        if (usedMb !== null && usedMb >= state.memoryLimitMb) {
-          stopForMemoryPressure(usedMb);
-        }
-      }, MEMORY_CHECK_INTERVAL_MS);
-    };
-
-    const setMemoryLimit = async (value) => {
-      const parsed = Number.parseFloat(value);
-      if (!Number.isFinite(parsed) || parsed <= 0) return;
-      state.memoryLimitMb = Math.max(50, Math.round(parsed));
-      await uiStore.set(MEMORY_LIMIT_KEY, state.memoryLimitMb);
-    };
-
+    /**
+     * Ensure UI elements are attached and visible.
+     */
     const ensureVisible = () => {
       if (state.button) {
         if (!SAFE_DOC.body.contains(state.button)) {
@@ -382,6 +337,10 @@
       }
     };
 
+    /**
+     * Persist UI dock position.
+     * @param {string} pos Position value.
+     */
     const setPosition = async (pos) => {
       state.position = pos === 'left' ? 'left' : 'right';
       const btn = state.button;
@@ -398,6 +357,10 @@
       await storage.set(STORAGE_KEY_POSITION, state.position);
     };
 
+    /**
+     * Show a message in the main panel.
+     * @param {string} text Message to display.
+     */
     const showPanelMessage = (text) => {
       if (!state.panel) return;
       state.panel.innerHTML = '';
@@ -407,6 +370,9 @@
       state.panel.appendChild(empty);
     };
 
+    /**
+     * Render the script tab list.
+     */
     const renderTabs = () => {
       if (!state.tabs) return;
       const entries = Array.from(state.scripts.values());
@@ -459,6 +425,10 @@
       state.tabs.appendChild(fragment);
     };
 
+    /**
+     * Switch the active panel to the given script id.
+     * @param {string} id Script id.
+     */
     const switchPanel = async (id) => {
       state.activeId = id;
       writeLocal(STORAGE_KEY_ACTIVE, id);
@@ -482,6 +452,9 @@
       }
     };
 
+    /**
+     * Toggle the shared UI modal visibility.
+     */
     const toggleModal = () => {
       if (!state.modal) return;
       ensureVisible();
@@ -505,6 +478,9 @@
       }
     };
 
+    /**
+     * Build the UI button and modal chrome once.
+     */
     const buildChrome = () => {
       if (state.button && state.modal) return;
       const btn = SAFE_DOC.createElement('button');
@@ -533,22 +509,8 @@
         ev.preventDefault();
         setPosition(state.position === 'right' ? 'left' : 'right');
       });
-      const memBtn = SAFE_DOC.createElement('button');
-      memBtn.type = 'button';
-      memBtn.textContent = 'Memory';
-      memBtn.title = 'Set memory limit for Userscript UI';
-      memBtn.addEventListener(clickEvent, (ev) => {
-        ev.preventDefault();
-        const next = prompt('Set memory limit in MB (minimum 50):', String(state.memoryLimitMb));
-        if (next !== null) {
-          setMemoryLimit(next).then(() => {
-            memBtn.textContent = `Memory ${state.memoryLimitMb}MB`;
-          });
-        }
-      });
       header.appendChild(title);
       header.appendChild(posBtn);
-      header.appendChild(memBtn);
       const tabs = SAFE_DOC.createElement('div');
       tabs.id = TABLIST_ID;
       const panel = SAFE_DOC.createElement('div');
@@ -563,7 +525,6 @@
       state.modal = modal;
       state.tabs = tabs;
       state.panel = panel;
-      state.memoryButton = memBtn;
       ensureVisible();
       tabs.addEventListener(clickEvent, (ev) => {
         const target = ev.target.closest('.userscripts-tab');
@@ -597,17 +558,27 @@
       });
     };
 
+    /**
+     * Load stored dock position and apply it.
+     */
     const ensurePosition = async () => {
       const storedGM = await storage.get(STORAGE_KEY_POSITION, null);
       const pos = storedGM || readLocal(STORAGE_KEY_POSITION, null) || DEFAULT_POSITION;
       await setPosition(pos);
     };
 
+    /**
+     * Load stored active panel id and apply it.
+     */
     const ensureActive = async () => {
       const storedGM = await storage.get(STORAGE_KEY_ACTIVE, null);
       state.activeId = storedGM || readLocal(STORAGE_KEY_ACTIVE, null) || null;
     };
 
+    /**
+     * Register a script panel with the shared UI.
+     * @param {object} scriptConfig Script registration details.
+     */
     const registerScript = (scriptConfig) => {
       const { id, title, render, enabled, onToggle } = scriptConfig;
       if (!id) throw new Error('id required');
@@ -624,6 +595,11 @@
       renderTabs();
     };
 
+    /**
+     * Update enabled state for a script.
+     * @param {string} id Script id.
+     * @param {boolean} value Enabled state.
+     */
     const setScriptEnabled = (id, value) => {
       const entry = state.scripts.get(id);
       if (!entry) return;
@@ -649,13 +625,11 @@
       }
     };
 
+    /**
+     * Initialize UI position, active panel, and tabs.
+     */
     const init = async () => {
       buildChrome();
-      state.memoryLimitMb = await uiStore.get(MEMORY_LIMIT_KEY, MEMORY_LIMIT_MB_DEFAULT);
-      if (state.memoryButton) {
-        state.memoryButton.textContent = `Memory ${state.memoryLimitMb}MB`;
-      }
-      startMemoryGuard();
       await ensurePosition();
       await ensureActive();
       renderTabs();

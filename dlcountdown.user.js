@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Timer Accelerator
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.11.1505
+// @version      2026.01.16.1055
 // @description  Accelerates download countdown timers with comprehensive file-host verification support (FreeDlink, Rapidgator, Uploaded, etc).
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cG9seWxpbmUgcG9pbnRzPSIxMiA2IDEyIDEyIDE2IDE0Ii8+PC9zdmc+
@@ -61,9 +61,6 @@
     const SCRIPT_TITLE = 'Timer Accelerator';
     const ENABLE_KEY = `${SCRIPT_ID}.enabled`;
     const ALWAYS_RUN_KEY = `${SCRIPT_ID}.alwaysRun`;
-    const MEMORY_LIMIT_MB_DEFAULT = 200;
-    const MEMORY_LIMIT_KEY = `${SCRIPT_ID}.memoryLimitMb`;
-    const MEMORY_CHECK_INTERVAL_MS = 5000;
     const ATTENTION_STYLE_ID = 'timer-accelerator-attention-style';
     const ATTENTION_CLASS = 'userscripts-ui-button--timer-attention';
     const TARGET_PATTERNS = [
@@ -257,9 +254,6 @@
         alwaysRun: false,
         isTarget: false,
         menuIds: [],
-        memoryLimitMb: MEMORY_LIMIT_MB_DEFAULT,
-        memoryIntervalId: null,
-        memoryTripped: false,
         observer: null,
         fieldObserver: null,
         rescanInterval: null,
@@ -460,41 +454,6 @@
         debug: DEBUG
     });
 
-    const getMemoryUsageMb = () => {
-        const mem = (typeof performance !== 'undefined' && performance && performance.memory) ? performance.memory : null;
-        if (!mem || typeof mem.usedJSHeapSize !== 'number') return null;
-        return mem.usedJSHeapSize / (1024 * 1024);
-    };
-
-    const stopForMemoryPressure = (usedMb) => {
-        if (state.memoryTripped) return;
-        state.memoryTripped = true;
-        if (state.memoryIntervalId) {
-            clearInterval(state.memoryIntervalId);
-            state.memoryIntervalId = null;
-        }
-        void setEnabled(false);
-        stop();
-        log('warn', `Memory limit exceeded (${usedMb.toFixed(1)} MB). Script disabled.`);
-    };
-
-    const startMemoryGuard = () => {
-        if (state.memoryIntervalId || !state.memoryLimitMb) return;
-        state.memoryIntervalId = setInterval(() => {
-            const usedMb = getMemoryUsageMb();
-            if (usedMb !== null && usedMb >= state.memoryLimitMb) {
-                stopForMemoryPressure(usedMb);
-            }
-        }, MEMORY_CHECK_INTERVAL_MS);
-    };
-
-    const setMemoryLimit = async (value) => {
-        const parsed = Number.parseFloat(value);
-        if (!Number.isFinite(parsed) || parsed <= 0) return;
-        state.memoryLimitMb = Math.max(50, Math.round(parsed));
-        await gmStore.set(MEMORY_LIMIT_KEY, state.memoryLimitMb);
-        registerMenu();
-    };
 
     //////////////////////////////////////////////////////////////
     // CORE LOGIC - TIMER ACCELERATION
@@ -1197,6 +1156,10 @@
         originalFunctions.clear();
     };
 
+    /**
+     * Stop timers, observers, and restore patched behavior.
+     * @returns {Promise<void>}
+     */
     const stop = async () => {
         if (!state.started) return;
         state.started = false;
@@ -1253,10 +1216,13 @@
         restoreOriginalFunctions();
     };
 
+    /**
+     * Start timer acceleration flow.
+     * @returns {Promise<void>}
+     */
     const start = async () => {
         if (state.started) return;
         state.started = true;
-        startMemoryGuard();
         handleUrlChange();
         if (state.isTarget) {
             runGenericHandler();
@@ -1331,6 +1297,9 @@
         }
     }
 
+    /**
+     * Register Tampermonkey menu commands.
+     */
     const registerMenu = () => {
         if (typeof GM_registerMenuCommand !== 'function') return;
         if (hasUnregister && state.menuIds.length) {
@@ -1350,13 +1319,6 @@
             `[Timer] ${state.alwaysRun ? 'Disable' : 'Enable'} Always Run`,
             async () => { await setAlwaysRun(!state.alwaysRun); }
         ));
-        state.menuIds.push(GM_registerMenuCommand(
-            `[Timer] 🧠 Memory limit (${state.memoryLimitMb} MB)`,
-            () => {
-                const next = prompt('Set memory limit in MB (minimum 50):', String(state.memoryLimitMb));
-                if (next !== null) setMemoryLimit(next);
-            }
-        ));
         if (state.enabled) {
             state.menuIds.push(GM_registerMenuCommand('[Timer] ⟳ Rescan timers', () => {
                 utils.findAndAccelerateTimerElements();
@@ -1366,6 +1328,11 @@
         }
     };
 
+    /**
+     * Enable or disable the script.
+     * @param {boolean} value Desired enabled state.
+     * @returns {Promise<void>}
+     */
     const setEnabled = async (value) => {
         state.enabled = !!value;
         await gmStore.set(ENABLE_KEY, state.enabled);
@@ -1385,6 +1352,10 @@
     // UI COMPONENTS
     //////////////////////////////////////////////////////////////
 
+    /**
+     * Render the shared UI panel for this script.
+     * @returns {HTMLDivElement} Panel root element.
+     */
     const renderPanel = () => {
         Object.keys(uiRefs).forEach((key) => { uiRefs[key] = null; });
 
@@ -1467,27 +1438,6 @@
         buttons.appendChild(alwaysRunBtn);
 
         wrapper.appendChild(buttons);
-        const memoryNote = doc.createElement('div');
-        memoryNote.textContent = `Memory guard limit: ${state.memoryLimitMb} MB`;
-        memoryNote.style.fontSize = '12px';
-        memoryNote.style.color = '#94a3b8';
-        wrapper.appendChild(memoryNote);
-
-        const memoryBtn = doc.createElement('button');
-        memoryBtn.type = 'button';
-        memoryBtn.textContent = 'Set memory limit';
-        memoryBtn.style.padding = '8px 12px';
-        memoryBtn.style.borderRadius = '6px';
-        memoryBtn.style.border = '1px solid rgba(255,255,255,0.18)';
-        memoryBtn.style.background = '#1f2937';
-        memoryBtn.style.color = '#f8fafc';
-        memoryBtn.style.cursor = 'pointer';
-        memoryBtn.style.fontSize = '13px';
-        memoryBtn.addEventListener('click', () => {
-            const next = prompt('Set memory limit in MB (minimum 50):', String(state.memoryLimitMb));
-            if (next !== null) setMemoryLimit(next);
-        });
-        wrapper.appendChild(memoryBtn);
         refreshPanelUi();
         return wrapper;
     };
@@ -1498,7 +1448,6 @@
 
     const savedAlwaysRun = await gmStore.get(ALWAYS_RUN_KEY, false);
     const savedEnabled = await gmStore.get(ENABLE_KEY, false);
-    state.memoryLimitMb = await gmStore.get(MEMORY_LIMIT_KEY, MEMORY_LIMIT_MB_DEFAULT);
     state.alwaysRun = !!savedAlwaysRun;
     state.enabled = !!savedEnabled;
 
