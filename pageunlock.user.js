@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Page Unlocker
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.16.1055
+// @version      2026.01.16.1631
 // @description  Unlock text selection, copy/paste, and context menu on restrictive sites. Optional overlay buster + aggressive mode. Lightweight + SPA-friendly.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHJlY3QgeD0iMyIgeT0iMTEiIHdpZHRoPSIxOCIgaGVpZ2h0PSIxMSIgcng9IjIiIHJ5PSIyIi8+PHBhdGggZD0iTTcgMTFWN2E1IDUgMCAwIDEgOS45LTEiLz48L3N2Zz4=
@@ -39,6 +39,10 @@
   - Toggle aggressive mode, overlay buster, and other options via menu commands.
   - Per-host disable list to exclude sites where unlocking causes issues.
   - Keyboard shortcut (Alt+Shift+U by default) to quickly toggle the unlocker.
+  - Manual test (Android/XBrowser):
+    1) Enable Page Unlocker and Always Run in shared UI.
+    2) Load a restrictive page and verify selection + copy works.
+    3) Disable the script and confirm no further changes occur after reload.
 */
 
 (function () {
@@ -115,6 +119,10 @@
   const state = {
     menuIds: [],
     observers: [], // Track MutationObservers for cleanup
+    resources: null,
+    historyPatched: false,
+    originalPushState: null,
+    originalReplaceState: null,
   };
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
   const MENU_PREFIX = '[Unlock]';
@@ -286,8 +294,7 @@
       sharedUi.setScriptEnabled(SCRIPT_ID, cfg.enabled);
     }
     registerMenu();
-    // Cleanup observers before reload
-    disconnectObservers();
+    cleanupResources();
     location.reload();
   }
 
@@ -307,6 +314,83 @@
   }
 
   /**
+   * Create a resource tracker for timers, observers, listeners, and DOM nodes.
+   * @returns {object} Tracker with register/cleanup helpers.
+   */
+  function createResourceTracker() {
+    const tracker = {
+      intervals: new Set(),
+      timeouts: new Set(),
+      observers: new Set(),
+      listeners: [],
+      nodes: new Set(),
+      styles: new Set(),
+    };
+
+    return {
+      trackInterval(id) {
+        if (id) tracker.intervals.add(id);
+        return id;
+      },
+      trackTimeout(id) {
+        if (id) tracker.timeouts.add(id);
+        return id;
+      },
+      trackObserver(observer) {
+        if (observer) tracker.observers.add(observer);
+        return observer;
+      },
+      trackListener(target, type, handler, options) {
+        if (!target || !type || !handler) return;
+        target.addEventListener(type, handler, options);
+        tracker.listeners.push({ target, type, handler, options });
+      },
+      trackNode(node) {
+        if (node) tracker.nodes.add(node);
+        return node;
+      },
+      trackStyle(node) {
+        if (node) tracker.styles.add(node);
+        return node;
+      },
+      cleanup() {
+        tracker.intervals.forEach((id) => { try { clearInterval(id); } catch (_) {} });
+        tracker.timeouts.forEach((id) => { try { clearTimeout(id); } catch (_) {} });
+        tracker.observers.forEach((observer) => { try { observer.disconnect(); } catch (_) {} });
+        tracker.listeners.forEach(({ target, type, handler, options }) => {
+          try { target.removeEventListener(type, handler, options); } catch (_) {}
+        });
+        tracker.nodes.forEach((node) => { try { node.remove(); } catch (_) {} });
+        tracker.styles.forEach((node) => { try { node.remove(); } catch (_) {} });
+        tracker.intervals.clear();
+        tracker.timeouts.clear();
+        tracker.observers.clear();
+        tracker.listeners.length = 0;
+        tracker.nodes.clear();
+        tracker.styles.clear();
+      }
+    };
+  }
+
+  /**
+   * Clean up all tracked resources and observers.
+   */
+  function cleanupResources() {
+    disconnectObservers();
+    if (state.resources) {
+      state.resources.cleanup();
+      state.resources = null;
+    }
+    if (state.historyPatched) {
+      try {
+        if (state.originalPushState) history.pushState = state.originalPushState;
+        if (state.originalReplaceState) history.replaceState = state.originalReplaceState;
+      } catch (_) {}
+      state.historyPatched = false;
+    }
+  }
+
+  /**
    * Toggle Always Run and reload.
    * @param {boolean} next Next Always Run state.
    */
@@ -314,6 +398,7 @@
     cfg.alwaysRun = !!next;
     gmSet(STORAGE_KEY, cfg);
     registerMenu();
+    cleanupResources();
     location.reload();
   }
 
@@ -335,6 +420,7 @@
     cfg.disabledHosts = [...set].sort();
     gmSet(STORAGE_KEY, cfg);
     registerMenu();
+    cleanupResources();
     location.reload();
   }
 
@@ -346,6 +432,7 @@
     cfg.aggressive = typeof next === 'boolean' ? next : !cfg.aggressive;
     gmSet(STORAGE_KEY, cfg);
     registerMenu();
+    cleanupResources();
     location.reload();
   }
 
@@ -357,6 +444,7 @@
     cfg.overlayBuster = typeof next === 'boolean' ? next : !cfg.overlayBuster;
     gmSet(STORAGE_KEY, cfg);
     registerMenu();
+    cleanupResources();
     location.reload();
   }
 
@@ -368,6 +456,7 @@
     cfg.cleanCopyTail = typeof next === 'boolean' ? next : !cfg.cleanCopyTail;
     gmSet(STORAGE_KEY, cfg);
     registerMenu();
+    cleanupResources();
     location.reload();
   }
 
@@ -379,6 +468,7 @@
     cfg.interceptKeys = typeof next === 'boolean' ? next : !cfg.interceptKeys;
     gmSet(STORAGE_KEY, cfg);
     registerMenu();
+    cleanupResources();
     location.reload();
   }
 
@@ -520,13 +610,6 @@
     return panel;
   }
 
-  registerMenu();
-
-  // Always return early if globally/site disabled, but keep menu available.
-  // Dormant by default: only run automatically if Always Run is enabled
-  if (!cfg.enabled || isHostDisabled || !cfg.alwaysRun) return;
-
-
   // --- Core behaviour ---
   const EVENT_BASE = [
     'contextmenu',
@@ -572,7 +655,9 @@
     try {
       if (!styleEl) styleEl = document.getElementById(STYLE_ID);
       if (!styleEl) {
-        styleEl = document.createElement('style');
+        styleEl = state.resources
+          ? state.resources.trackStyle(document.createElement('style'))
+          : document.createElement('style');
         styleEl.id = STYLE_ID;
         styleEl.type = 'text/css';
         styleEl.textContent = UNLOCK_CSS;
@@ -601,6 +686,8 @@
     };
     if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(trigger);
+    } else if (state.resources) {
+      state.resources.trackTimeout(setTimeout(trigger, 0));
     } else {
       setTimeout(trigger, 0);
     }
@@ -641,8 +728,13 @@
    */
   function installEventStoppers(types) {
     for (const type of types) {
-      document.addEventListener(type, stopPropagationEarly, true);
-      window.addEventListener(type, stopPropagationEarly, true);
+      if (state.resources) {
+        state.resources.trackListener(document, type, stopPropagationEarly, true);
+        state.resources.trackListener(window, type, stopPropagationEarly, true);
+      } else {
+        document.addEventListener(type, stopPropagationEarly, true);
+        window.addEventListener(type, stopPropagationEarly, true);
+      }
     }
   }
 
@@ -675,7 +767,11 @@
    */
   function installCopyCleaner() {
     if (!cfg.cleanCopyTail) return;
-    document.addEventListener('copy', onCopyCapture, true);
+    if (state.resources) {
+      state.resources.trackListener(document, 'copy', onCopyCapture, true);
+    } else {
+      document.addEventListener('copy', onCopyCapture, true);
+    }
   }
 
   // --- Aggressive mode: patch page context to ignore event hooks for our blocked event types ---
@@ -871,6 +967,9 @@
       const wrap = (fnName) => {
         const orig = history[fnName];
         if (typeof orig !== 'function') return;
+        if (fnName === 'pushState') state.originalPushState = orig;
+        if (fnName === 'replaceState') state.originalReplaceState = orig;
+        state.historyPatched = true;
         history[fnName] = function () {
           const r = orig.apply(this, arguments);
           queueMicrotask(() => {
@@ -882,10 +981,15 @@
       };
       wrap('pushState');
       wrap('replaceState');
-      window.addEventListener('popstate', () => {
+      const onPop = () => {
         ensureStyleLast();
         clearTopLevelDom0Handlers();
-      }, true);
+      };
+      if (state.resources) {
+        state.resources.trackListener(window, 'popstate', onPop, true);
+      } else {
+        window.addEventListener('popstate', onPop, true);
+      }
     } catch (_) {}
   }
 
@@ -895,7 +999,9 @@
    */
   function installObservers() {
     // 1) Keep our style last if the site injects later CSS.
-    const headWatcher = new MutationObserver(() => scheduleEnsureStyleLast());
+    const headWatcher = state.resources
+      ? state.resources.trackObserver(new MutationObserver(() => scheduleEnsureStyleLast()))
+      : new MutationObserver(() => scheduleEnsureStyleLast());
 
     const attachHeadWatcher = () => {
       const head = document.head;
@@ -911,11 +1017,14 @@
 
     if (!attachHeadWatcher()) {
       // Wait for <head>.
-      const wait = new MutationObserver(() => {
-        if (attachHeadWatcher()) wait.disconnect();
-      });
+      const wait = state.resources
+        ? state.resources.trackObserver(new MutationObserver(() => {
+          if (attachHeadWatcher()) wait.disconnect();
+        }))
+        : new MutationObserver(() => {
+          if (attachHeadWatcher()) wait.disconnect();
+        });
       wait.observe(document.documentElement, { childList: true, subtree: true });
-      // Don't track 'wait' - it disconnects itself
     }
 
     // 2) Remove newly-added inline handlers for the key events.
@@ -928,21 +1037,37 @@
       'onpaste',
     ];
 
-    const attrWatcher = new MutationObserver((muts) => {
-      for (const m of muts) {
-        const el = m.target;
-        if (!el || el.nodeType !== 1) continue;
-        const a = m.attributeName;
-        if (!a) continue;
-        if (attrFilter.includes(a)) {
-          try {
-            el.removeAttribute(a);
-            // Also clear property in case the browser reflected it.
-            el[a] = null;
-          } catch (_) {}
+    const attrWatcher = state.resources
+      ? state.resources.trackObserver(new MutationObserver((muts) => {
+        for (const m of muts) {
+          const el = m.target;
+          if (!el || el.nodeType !== 1) continue;
+          const a = m.attributeName;
+          if (!a) continue;
+          if (attrFilter.includes(a)) {
+            try {
+              el.removeAttribute(a);
+              // Also clear property in case the browser reflected it.
+              el[a] = null;
+            } catch (_) {}
+          }
         }
-      }
-    });
+      }))
+      : new MutationObserver((muts) => {
+        for (const m of muts) {
+          const el = m.target;
+          if (!el || el.nodeType !== 1) continue;
+          const a = m.attributeName;
+          if (!a) continue;
+          if (attrFilter.includes(a)) {
+            try {
+              el.removeAttribute(a);
+              // Also clear property in case the browser reflected it.
+              el[a] = null;
+            } catch (_) {}
+          }
+        }
+      });
 
     attrWatcher.observe(document.documentElement, {
       subtree: true,
@@ -974,14 +1099,23 @@
           setTimeout(flushOverlayQueue, 16);
         }
       };
-      const overlayWatcher = new MutationObserver((muts) => {
-        for (const m of muts) {
-          for (const n of m.addedNodes || []) {
-            overlayQueue.add(n);
+      const overlayWatcher = state.resources
+        ? state.resources.trackObserver(new MutationObserver((muts) => {
+          for (const m of muts) {
+            for (const n of m.addedNodes || []) {
+              overlayQueue.add(n);
+            }
           }
-        }
-        scheduleOverlayScan();
-      });
+          scheduleOverlayScan();
+        }))
+        : new MutationObserver((muts) => {
+          for (const m of muts) {
+            for (const n of m.addedNodes || []) {
+              overlayQueue.add(n);
+            }
+          }
+          scheduleOverlayScan();
+        });
 
       // Attach when body exists.
       const attachBody = () => {
@@ -995,11 +1129,14 @@
       };
 
       if (!attachBody()) {
-        const waitBody = new MutationObserver(() => {
-          if (attachBody()) waitBody.disconnect();
-        });
+        const waitBody = state.resources
+          ? state.resources.trackObserver(new MutationObserver(() => {
+            if (attachBody()) waitBody.disconnect();
+          }))
+          : new MutationObserver(() => {
+            if (attachBody()) waitBody.disconnect();
+          });
         waitBody.observe(document.documentElement, { childList: true, subtree: true });
-        // Don't track 'waitBody' - it disconnects itself
       }
     }
   }
@@ -1010,7 +1147,7 @@
    */
   function installHotkey() {
     const hk = cfg.hotkey || DEFAULT_CFG.hotkey;
-    document.addEventListener('keydown', (e) => {
+    const handler = (e) => {
       if (!!hk.alt !== e.altKey) return;
       if (!!hk.shift !== e.shiftKey) return;
       if (hk.ctrl && !e.ctrlKey) return;
@@ -1019,25 +1156,45 @@
 
       e.stopImmediatePropagation();
       forceUnlockNow();
-    }, true);
+    };
+    if (state.resources) {
+      state.resources.trackListener(document, 'keydown', handler, true);
+    } else {
+      document.addEventListener('keydown', handler, true);
+    }
   }
 
   //////////////////////////////////////////////////////////////
   // INITIALIZATION 
   //////////////////////////////////////////////////////////////
 
-  // --- Bootstrap ---
-  ensureStyleLast();
-  clearTopLevelDom0Handlers();
+  /**
+   * Main entrypoint for Page Unlocker.
+   */
+  function main() {
+    registerMenu();
 
-  if (cfg.aggressive) {
-    // In aggressive mode we also block more event types (including mouse/key) at the page level.
-    injectAggressivePatch(stopEvents.concat(['mousedown', 'mouseup', 'click', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'keydown', 'keypress', 'keyup']));
+    // Always return early if globally/site disabled, but keep menu available.
+    // Dormant by default: only run automatically if Always Run is enabled
+    if (!cfg.enabled || isHostDisabled || !cfg.alwaysRun) return;
+
+    state.resources = createResourceTracker();
+
+    // --- Bootstrap ---
+    ensureStyleLast();
+    clearTopLevelDom0Handlers();
+
+    if (cfg.aggressive) {
+      // In aggressive mode we also block more event types (including mouse/key) at the page level.
+      injectAggressivePatch(stopEvents.concat(['mousedown', 'mouseup', 'click', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'keydown', 'keypress', 'keyup']));
+    }
+
+    installEventStoppers(stopEvents);
+    installCopyCleaner();
+    installObservers();
+    hookHistory();
+    installHotkey();
   }
 
-  installEventStoppers(stopEvents);
-  installCopyCleaner();
-  installObservers();
-  hookHistory();
-  installHotkey();
+  main();
 })();

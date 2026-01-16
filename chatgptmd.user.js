@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Exporter for Android (md/txt/json)
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.16.1055
+// @version      2026.01.16.1631
 // @description  Export ChatGPT conversations to Markdown, JSON, or text with download, copy, and share actions. UI integrated with shared userscript panel.
 // @author       cbcoz
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTIxIDE1djRhMiAyIDAgMCAxLTIgMkg1YTIgMiAwIDAgMS0yLTJ2LTQiLz48cG9seWxpbmUgcG9pbnRzPSI3IDEwIDEyIDE1IDE3IDEwIi8+PGxpbmUgeDE9IjEyIiB5MT0iMTUiIHgyPSIxMiIgeTI9IjMiLz48L3N2Zz4=
@@ -47,6 +47,10 @@
   - Toggle API export or citation formatting in the shared UI panel.
   - Use "Quick export (.md)" menu command for fast markdown downloads.
   - Set DEBUG to true for detailed console logging.
+  - Manual test (Android/XBrowser):
+    1) Enable the script and open a ChatGPT conversation.
+    2) Run "Quick export (.md)" and confirm the download or share prompt.
+    3) Disable the script and verify menu commands are removed.
 */
 
 (() => {
@@ -95,6 +99,70 @@
       try { await GM_setValue(key, value); } catch (_) {}
     }
   };
+  /**
+   * Create a resource tracker for timers, observers, listeners, and DOM nodes.
+   * @returns {object} Tracker helpers.
+   */
+  const createResourceTracker = () => {
+    const tracker = {
+      intervals: new Set(),
+      timeouts: new Set(),
+      observers: new Set(),
+      listeners: [],
+      nodes: new Set()
+    };
+
+    return {
+      trackInterval(id) {
+        if (id) tracker.intervals.add(id);
+        return id;
+      },
+      trackTimeout(id) {
+        if (id) tracker.timeouts.add(id);
+        return id;
+      },
+      trackObserver(observer) {
+        if (observer) tracker.observers.add(observer);
+        return observer;
+      },
+      trackListener(target, type, handler, options) {
+        if (!target || !type || !handler) return;
+        target.addEventListener(type, handler, options);
+        tracker.listeners.push({ target, type, handler, options });
+      },
+      trackNode(node) {
+        if (node) tracker.nodes.add(node);
+        return node;
+      },
+      cleanup() {
+        tracker.intervals.forEach((id) => { try { clearInterval(id); } catch (_) {} });
+        tracker.timeouts.forEach((id) => { try { clearTimeout(id); } catch (_) {} });
+        tracker.observers.forEach((observer) => { try { observer.disconnect(); } catch (_) {} });
+        tracker.listeners.forEach(({ target, type, handler, options }) => {
+          try { target.removeEventListener(type, handler, options); } catch (_) {}
+        });
+        tracker.nodes.forEach((node) => { try { node.remove(); } catch (_) {} });
+        tracker.intervals.clear();
+        tracker.timeouts.clear();
+        tracker.observers.clear();
+        tracker.listeners.length = 0;
+        tracker.nodes.clear();
+      }
+    };
+  };
+
+  const resources = createResourceTracker();
+  const nativeSetTimeout = window.setTimeout.bind(window);
+  const nativeSetInterval = window.setInterval.bind(window);
+  const setTimeout = (...args) => resources.trackTimeout(nativeSetTimeout(...args));
+  const setInterval = (...args) => resources.trackInterval(nativeSetInterval(...args));
+  const NativeMutationObserver = window.MutationObserver;
+  const MutationObserver = function(callback) {
+    const observer = new NativeMutationObserver(callback);
+    resources.trackObserver(observer);
+    return observer;
+  };
+  MutationObserver.prototype = NativeMutationObserver.prototype;
   // Robust shared UI detection across sandbox boundaries
   // Try to use helper from userscriptui.user.js if available, otherwise use fallback
   let sharedUi = null;
@@ -193,7 +261,7 @@
       // Always try registration when event fires (idempotent)
       tryRegisterScript();
     };
-    document.addEventListener('userscriptSharedUiReady', eventListenerRef);
+    resources.trackListener(document, 'userscriptSharedUiReady', eventListenerRef);
     
     // Polling fallback for race conditions where event already fired
     // or userscriptui.user.js loads after this script
@@ -323,6 +391,7 @@
   const stop = async () => {
     if (!state.started) return;
     state.started = false;
+    resources.cleanup();
     log('debug', 'Script stopped');
   };
 
