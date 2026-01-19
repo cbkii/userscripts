@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Router Contrast Dark Mode
 // @namespace    https://github.com/cbkii/userscripts
-// @version      2026.01.16.1631
+// @version      2026.01.19.0217
 // @description  High-contrast dark mode for the VX230V router UI.
 // @author       cbkii
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkYxNDkzIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTIxIDEyLjc5QTkgOSAwIDEgMSAxMS4yMSAzIDcgNyAwIDAgMCAyMSAxMi43OXoiLz48L3N2Zz4=
@@ -27,9 +27,11 @@
   Feature summary:
   - Applies a high-contrast dark theme to the router UI.
   - Keeps map icons readable and maintains dark background overrides.
+  - Forces text selection to remain enabled for router values (ex: MAC addresses).
 
   How it works:
   - Injects CSS for dark styling and observes DOM changes to reapply styles.
+  - Overrides user-select restrictions with CSS and DOM attribute resets.
 
   Configuration:
   - No user settings; edit the CSS in main() if needed.
@@ -263,6 +265,8 @@
     menuIds: [],
     observers: [],
     styleNode: null,
+    selectableStyleNode: null,
+    selectableRestore: null,
     unloadHandler: null
   };
   const hasUnregister = typeof GM_unregisterMenuCommand === 'function';
@@ -438,11 +442,46 @@
       }
     };
 
+    const SELECTABLE_CSS = `
+    * {
+      -webkit-user-select: text !important;
+      -moz-user-select: text !important;
+      -ms-user-select: text !important;
+      user-select: text !important;
+    }
+
+    td, th, span, input[type="text"], input[type="password"], input[type="search"],
+    input[type="tel"], input[type="url"], input[type="email"], textarea, pre, code {
+      -webkit-user-select: text !important;
+      user-select: text !important;
+    }
+    `;
+
+    const applySelectableStyles = () => {
+      try {
+        const node = GM_addStyle(SELECTABLE_CSS);
+        if (node) state.selectableStyleNode = node;
+      } catch (_) {
+        const style = document.createElement('style');
+        style.textContent = SELECTABLE_CSS;
+        (document.head || document.documentElement).appendChild(style);
+        state.selectableStyleNode = style;
+      }
+    };
+
+    const removeSelectableStyles = () => {
+      if (state.selectableStyleNode && state.selectableStyleNode.parentNode) {
+        try { state.selectableStyleNode.parentNode.removeChild(state.selectableStyleNode); } catch (_) {}
+      }
+      state.selectableStyleNode = null;
+    };
+
     const removeStyles = () => {
       if (state.styleNode && state.styleNode.parentNode) {
         try { state.styleNode.parentNode.removeChild(state.styleNode); } catch (_) {}
       }
       state.styleNode = null;
+      removeSelectableStyles();
     };
 
     const disconnectObservers = () => {
@@ -499,6 +538,153 @@
       }
     };
 
+    const makeTextSelectable = () => {
+      const NULL_MARKER = '__vxdark_null__';
+      const TOUCH_ATTR = 'data-vxdark-selectable';
+      const STORE_ATTR_USER = 'data-vxdark-prev-user-select';
+      const STORE_ATTR_WEBKIT = 'data-vxdark-prev-webkit-user-select';
+      const STORE_ATTR_MOZ = 'data-vxdark-prev-moz-user-select';
+      const STORE_ATTR_MS = 'data-vxdark-prev-ms-user-select';
+      const STORE_ATTR_ONSELECT = 'data-vxdark-prev-onselectstart';
+      const STORE_ATTR_UNSELECT = 'data-vxdark-prev-unselectable';
+
+      applySelectableStyles();
+
+      const storeAttr = (el, attr, storeAttrName) => {
+        if (el.hasAttribute(storeAttrName)) return;
+        const value = el.getAttribute(attr);
+        el.setAttribute(storeAttrName, value === null ? NULL_MARKER : value);
+      };
+
+      const storeStyle = (el, prop, storeAttrName) => {
+        if (el.hasAttribute(storeAttrName)) return;
+        const value = el.style.getPropertyValue(prop);
+        el.setAttribute(storeAttrName, value ? value : NULL_MARKER);
+      };
+
+      const setSelectableStyle = (el, prop, storeAttrName) => {
+        storeStyle(el, prop, storeAttrName);
+        el.style.setProperty(prop, 'text', 'important');
+      };
+
+      const forceSelectable = (el) => {
+        if (!el || el.nodeType !== 1) return;
+        let touched = false;
+
+        if (el.hasAttribute('onselectstart')) {
+          storeAttr(el, 'onselectstart', STORE_ATTR_ONSELECT);
+          el.removeAttribute('onselectstart');
+          touched = true;
+        }
+
+        if (el.hasAttribute('unselectable')) {
+          storeAttr(el, 'unselectable', STORE_ATTR_UNSELECT);
+          el.removeAttribute('unselectable');
+          touched = true;
+        }
+
+        const style = el.style;
+        if (style) {
+          if (style.getPropertyValue('user-select') === 'none') {
+            setSelectableStyle(el, 'user-select', STORE_ATTR_USER);
+            touched = true;
+          }
+          if (style.getPropertyValue('-webkit-user-select') === 'none') {
+            setSelectableStyle(el, '-webkit-user-select', STORE_ATTR_WEBKIT);
+            touched = true;
+          }
+          if (style.getPropertyValue('-moz-user-select') === 'none') {
+            setSelectableStyle(el, '-moz-user-select', STORE_ATTR_MOZ);
+            touched = true;
+          }
+          if (style.getPropertyValue('-ms-user-select') === 'none') {
+            setSelectableStyle(el, '-ms-user-select', STORE_ATTR_MS);
+            touched = true;
+          }
+        }
+
+        if (touched) {
+          el.setAttribute(TOUCH_ATTR, '1');
+        }
+      };
+
+      const restoreSelectable = () => {
+        const touchedNodes = document.querySelectorAll(`[${TOUCH_ATTR}]`);
+        touchedNodes.forEach((el) => {
+          const restoreStyle = (prop, storeAttrName) => {
+            if (!el.hasAttribute(storeAttrName)) return;
+            const value = el.getAttribute(storeAttrName);
+            if (value === NULL_MARKER) {
+              el.style.removeProperty(prop);
+            } else {
+              el.style.setProperty(prop, value);
+            }
+            el.removeAttribute(storeAttrName);
+          };
+
+          restoreStyle('user-select', STORE_ATTR_USER);
+          restoreStyle('-webkit-user-select', STORE_ATTR_WEBKIT);
+          restoreStyle('-moz-user-select', STORE_ATTR_MOZ);
+          restoreStyle('-ms-user-select', STORE_ATTR_MS);
+
+          if (el.hasAttribute(STORE_ATTR_ONSELECT)) {
+            const value = el.getAttribute(STORE_ATTR_ONSELECT);
+            if (value === NULL_MARKER) {
+              el.removeAttribute('onselectstart');
+            } else {
+              el.setAttribute('onselectstart', value);
+            }
+            el.removeAttribute(STORE_ATTR_ONSELECT);
+          }
+
+          if (el.hasAttribute(STORE_ATTR_UNSELECT)) {
+            const value = el.getAttribute(STORE_ATTR_UNSELECT);
+            if (value === NULL_MARKER) {
+              el.removeAttribute('unselectable');
+            } else {
+              el.setAttribute('unselectable', value);
+            }
+            el.removeAttribute(STORE_ATTR_UNSELECT);
+          }
+
+          el.removeAttribute(TOUCH_ATTR);
+        });
+      };
+
+      state.selectableRestore = restoreSelectable;
+
+      const root = document.body || document.documentElement;
+      if (!root) return;
+      forceSelectable(root);
+      root.querySelectorAll('*').forEach(forceSelectable);
+
+      const mo = new MutationObserver((mutations) => {
+        if (!state.enabled) return;
+        mutations.forEach((mutation) => {
+          if (mutation.type === 'childList') {
+            mutation.addedNodes.forEach((node) => {
+              if (node.nodeType === 1) {
+                forceSelectable(node);
+                node.querySelectorAll?.('*').forEach(forceSelectable);
+              }
+            });
+          } else if (mutation.type === 'attributes') {
+            forceSelectable(mutation.target);
+          }
+        });
+      });
+
+      mo.observe(root, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['style', 'class', 'onselectstart', 'unselectable']
+      });
+
+      state.observers.push(mo);
+      log('info', 'Text selection overrides applied');
+    };
+
     const detachUnload = () => {
       if (state.unloadHandler) {
         window.removeEventListener('beforeunload', state.unloadHandler);
@@ -526,6 +712,10 @@
       disconnectObservers();
       detachUnload();
       removeStyles();
+      if (state.selectableRestore) {
+        try { state.selectableRestore(); } catch (_) {}
+        state.selectableRestore = null;
+      }
       resources.cleanup();
     };
 
@@ -538,6 +728,7 @@
       state.started = true;
       applyStyles();
       startObservers();
+      makeTextSelectable();
       attachUnload();
       log('info', 'Dark mode applied');
     };
